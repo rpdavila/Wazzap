@@ -1,63 +1,88 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
 from enum import Enum
+
+
+# -----------------------
+# ENUMS
+# -----------------------
 
 class ChatType(str, Enum):
     direct = "direct"
     group = "group"
 
+
 class MessageType(str, Enum):
     text = "text"
     media = "media"
 
-# --- User schemas ---
+
+# -----------------------
+# USER SCHEMAS
+# -----------------------
+
 class UserBase(BaseModel):
     username: str = Field(min_length=3, max_length=64)
 
+
 class UserCreate(UserBase):
     pin: str = Field(min_length=4, max_length=8)
+
 
 class UserOut(UserBase):
     id: int
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
-# --- Chat schemas ---
+
+# -----------------------
+# CHAT SCHEMAS
+# -----------------------
+
 class ChatBase(BaseModel):
     type: ChatType
     title: Optional[str] = None
+
 
 class ChatOut(ChatBase):
     id: int
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
-# --- ChatMember schemas ---
+
+# -----------------------
+# CHAT MEMBER SCHEMAS
+# -----------------------
+
 class ChatMemberBase(BaseModel):
     last_seen_at: Optional[datetime] = None
     active_chat_id: Optional[int] = None
+
 
 class ChatMemberOut(ChatMemberBase):
     chat_id: int
     user_id: int
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
-# --- Message schemas ---
+
+# -----------------------
+# MESSAGE SCHEMAS
+# -----------------------
+
 class MessageBase(BaseModel):
     type: MessageType
     text: Optional[str] = None
     media_url: Optional[str] = None
 
+
 class MessageCreate(MessageBase):
     chat_id: int
     sender_id: int
+
 
 class MessageOut(MessageBase):
     id: str
@@ -65,17 +90,20 @@ class MessageOut(MessageBase):
     sender_id: int
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
-# --- MessageStatus schemas ---
+
+# -----------------------
+# MESSAGE STATUS SCHEMAS
+# -----------------------
+
 class MessageStatusBase(BaseModel):
     received_at: Optional[datetime] = None
     read_at: Optional[datetime] = None
+
 
 class MessageStatusOut(MessageStatusBase):
     message_id: str
     user_id: int
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

@@ -4,7 +4,8 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 from database import Base
 import enum
-from datetime import datetime
+from datetime import datetime, UTC
+
 
 class ChatType(str, enum.Enum):
     direct = "direct"
@@ -25,18 +26,24 @@ class User(Base):
 
 class Chat(Base):
     __tablename__ = "chats"
-    id = Column(Integer, primary_key=True, index=True)
-    type = Column(Enum(ChatType), nullable=False)
-    title = Column(String(100), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    members = relationship("ChatMember", back_populates="chat")
+    id = Column(Integer, primary_key=True)
+    type = Column(String(20), nullable=False)
+    title = Column(String(255))
+    created_at = Column(DateTime, default=datetime.now(UTC))
+    members = relationship(
+        "ChatMember",
+        back_populates="chat",
+        foreign_keys="ChatMember.chat_id"
+
+    )
     messages = relationship("Message", back_populates="chat")
 
 class ChatMember(Base):
     __tablename__ = "chat_members"
+
     chat_id = Column(Integer, ForeignKey("chats.id"), primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
-    last_seen_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at = Column(DateTime)
     active_chat_id = Column(Integer, ForeignKey("chats.id"), nullable=True)
     chat = relationship("Chat", back_populates="members", foreign_keys=[chat_id])
     user = relationship("User", back_populates="chats", foreign_keys=[user_id])
@@ -49,7 +56,7 @@ class Message(Base):
     type = Column(Enum(MessageType), nullable=False)
     text = Column(String(500), nullable=True)
     media_url = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now(UTC))
     chat = relationship("Chat", back_populates="messages")
     sender = relationship("User", back_populates="messages")
     statuses = relationship("MessageStatus", back_populates="message")
