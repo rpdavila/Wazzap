@@ -7,7 +7,6 @@ from enum import Enum
 # -----------------------
 # ENUMS
 # -----------------------
-
 class ChatType(str, Enum):
     direct = "direct"
     group = "group"
@@ -21,7 +20,6 @@ class MessageType(str, Enum):
 # -----------------------
 # USER SCHEMAS
 # -----------------------
-
 class UserBase(BaseModel):
     username: str = Field(min_length=3, max_length=64)
 
@@ -40,7 +38,6 @@ class UserOut(UserBase):
 # -----------------------
 # CHAT SCHEMAS
 # -----------------------
-
 class ChatBase(BaseModel):
     type: ChatType
     title: Optional[str] = None
@@ -56,7 +53,6 @@ class ChatOut(ChatBase):
 # -----------------------
 # CHAT MEMBER SCHEMAS
 # -----------------------
-
 class ChatMemberBase(BaseModel):
     last_seen_at: Optional[datetime] = None
     active_chat_id: Optional[int] = None
@@ -72,7 +68,6 @@ class ChatMemberOut(ChatMemberBase):
 # -----------------------
 # MESSAGE SCHEMAS
 # -----------------------
-
 class MessageBase(BaseModel):
     type: MessageType
     text: Optional[str] = None
@@ -85,7 +80,7 @@ class MessageCreate(MessageBase):
 
 
 class MessageOut(MessageBase):
-    id: str
+    id: int  # changed to int to match SQLAlchemy model
     chat_id: int
     sender_id: int
     created_at: datetime
@@ -96,14 +91,13 @@ class MessageOut(MessageBase):
 # -----------------------
 # MESSAGE STATUS SCHEMAS
 # -----------------------
-
 class MessageStatusBase(BaseModel):
     received_at: Optional[datetime] = None
     read_at: Optional[datetime] = None
 
 
 class MessageStatusOut(MessageStatusBase):
-    message_id: str
+    message_id: int  # changed to int to match SQLAlchemy model
     user_id: int
 
     model_config = ConfigDict(from_attributes=True)
