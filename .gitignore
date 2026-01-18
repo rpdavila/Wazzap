@@ -4,6 +4,20 @@ node_modules
 .vscode/
 # __pycache__
 .__pycache__/
+# Python virtual environments
+backend/venv/
+venv/
+env/
+ENV/
 # backend env
 backend/.env
+.env
+# frontend
 frontend/.cursor
+# OS
+.DS_Store
+Thumbs.db
+# IDE
+*.swp
+*.swo
+*~
