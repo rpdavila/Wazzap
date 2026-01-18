@@ -39,19 +39,35 @@ const wsProtocol = getWsProtocol();
 export const config = {
   domain,
   get apiUrl() {
-    if (this.domain === 'localhost' || this.domain === '127.0.0.1') {
-      // For localhost, assume API runs on a different port or use localhost:8000
-      return import.meta.env.VITE_API_URL || `${protocol}://localhost:8000`;
+    // Check for explicit API URL override
+    if (import.meta.env.VITE_API_URL) {
+      return import.meta.env.VITE_API_URL;
     }
+    
+    // For localhost, use port-based (development)
+    if (this.domain === 'localhost' || this.domain === '127.0.0.1') {
+      return `${protocol}://localhost:8000`;
+    }
+    
+    // For production/Docker, use hostname-based routing
+    // Frontend is at chat.<domain>, backend is at chat-api.<domain>
     return `${protocol}://chat-api.${this.domain}`;
   },
   get wsUrl() {
-    if (this.domain === 'localhost' || this.domain === '127.0.0.1') {
-      // For localhost, assume WS runs on a different port or use localhost:8000
-      const baseUrl = import.meta.env.VITE_WS_URL || `${wsProtocol}://localhost:8000`;
+    // Check for explicit WebSocket URL override
+    if (import.meta.env.VITE_WS_URL) {
+      const baseUrl = import.meta.env.VITE_WS_URL;
       return baseUrl.endsWith('/api/ws') ? baseUrl : `${baseUrl}/api/ws`;
     }
+    
+    // For localhost, use port-based (development)
+    if (this.domain === 'localhost' || this.domain === '127.0.0.1') {
+      const baseUrl = `${wsProtocol}://localhost:8000`;
+      return `${baseUrl}/api/ws`;
+    }
+    
+    // For production/Docker, use hostname-based routing
     const baseUrl = `${wsProtocol}://chat-api.${this.domain}`;
-    return baseUrl.endsWith('/api/ws') ? baseUrl : `${baseUrl}/api/ws`;
+    return `${baseUrl}/api/ws`;
   }
 };

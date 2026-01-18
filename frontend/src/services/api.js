@@ -9,6 +9,13 @@ export class ApiError extends Error {
   }
 }
 
+// Helper function to create a timeout promise
+function createTimeoutPromise(timeoutMs) {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Request timeout')), timeoutMs);
+  });
+}
+
 async function request(endpoint, options = {}) {
   const authStore = get(auth);
   const headers = {
@@ -21,17 +28,65 @@ async function request(endpoint, options = {}) {
   }
 
   const url = `${config.apiUrl}${endpoint}`;
-  const response = await fetch(url, {
-    ...options,
-    headers
-  });
+  const timeoutMs = options.timeout || 10000; // Default 10 seconds
+  
+  // Remove timeout from options before passing to fetch
+  const { timeout, ...fetchOptions } = options;
+  
+  try {
+    const response = await Promise.race([
+      fetch(url, {
+        ...fetchOptions,
+        headers
+      }),
+      createTimeoutPromise(timeoutMs)
+    ]);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new ApiError(errorText || `HTTP ${response.status}`, response.status);
+    if (!response.ok) {
+    let errorMessage = `HTTP ${response.status}`;
+    // Clone response to read it multiple times if needed
+    const responseClone = response.clone();
+    try {
+      const errorData = await response.json();
+      // FastAPI returns errors as {detail: "message"} or {detail: [...]}
+      if (errorData.detail) {
+        errorMessage = Array.isArray(errorData.detail) 
+          ? errorData.detail.map(err => err.msg || err).join(', ')
+          : errorData.detail;
+      } else if (errorData.message) {
+        errorMessage = errorData.message;
+      } else if (typeof errorData === 'string') {
+        errorMessage = errorData;
+      }
+    } catch {
+      // If response is not JSON, try to get text from clone
+      try {
+        const errorText = await responseClone.text();
+        if (errorText) errorMessage = errorText;
+      } catch {
+        // Fallback to status code message
+      }
+    }
+    throw new ApiError(errorMessage, response.status);
   }
 
-  return response.json();
+    return response.json();
+  } catch (err) {
+    // Handle timeout and network errors
+    if (err.message === 'Request timeout') {
+      throw new ApiError('Request timed out. The server is not responding. Please check your connection and try again.', 408);
+    }
+    // Re-throw ApiError as-is
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    // Handle network errors (fetch failures)
+    if (err instanceof TypeError && err.message.includes('fetch')) {
+      throw new ApiError('Unable to connect to the server. Please check your internet connection and ensure the server is running.', 0);
+    }
+    // Re-throw other errors
+    throw err;
+  }
 }
 
 export const api = {
@@ -44,7 +99,16 @@ export const api = {
   },
 
   async getChats() {
-    return request('/api/chats');
+    const authStore = get(auth);
+    // Try to get user_id from auth store, fallback to username
+    const params = new URLSearchParams();
+    if (authStore.userId) {
+      params.append('user_id', authStore.userId.toString());
+    } else if (authStore.username) {
+      params.append('username', authStore.username);
+    }
+    const queryString = params.toString();
+    return request(`/api/chats${queryString ? '?' + queryString : ''}`);
   },
 
   async getMessages(chatId) {
@@ -56,19 +120,37 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${config.apiUrl}/api/media/upload`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${authStore.jwt}`
-      },
-      body: formData
-    });
+    const timeoutMs = 30000; // 30 seconds for file uploads
+    
+    try {
+      const response = await Promise.race([
+        fetch(`${config.apiUrl}/api/media/upload`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authStore.jwt}`
+          },
+          body: formData
+        }),
+        createTimeoutPromise(timeoutMs)
+      ]);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new ApiError(errorText || `HTTP ${response.status}`, response.status);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new ApiError(errorText || `HTTP ${response.status}`, response.status);
+      }
+
+      return response.json();
+    } catch (err) {
+      if (err.message === 'Request timeout') {
+        throw new ApiError('Upload timed out. Please try again.', 408);
+      }
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+        throw new ApiError('Unable to connect to the server. Please check your internet connection and ensure the server is running.', 0);
+      }
+      throw err;
     }
-
-    return response.json();
   }
 };

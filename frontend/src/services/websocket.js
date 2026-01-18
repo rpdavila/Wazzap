@@ -125,7 +125,8 @@ export function connectWebSocket() {
     return;
   }
 
-  const wsUrl = `${config.wsUrl}/api/ws?token=${authStore.jwt}&session_id=${authStore.sessionId}`;
+  // config.wsUrl already includes /api/ws
+  const wsUrl = `${config.wsUrl}?token=${encodeURIComponent(authStore.jwt)}&session_id=${encodeURIComponent(authStore.sessionId)}`;
   
   try {
     socket = new WebSocket(wsUrl);

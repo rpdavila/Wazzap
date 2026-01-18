@@ -4,6 +4,7 @@ function createAuthStore() {
   const { subscribe, set, update } = writable({
     isAuthenticated: false,
     username: null,
+    userId: null,
     jwt: null,
     sessionId: null
   });
@@ -13,11 +14,13 @@ function createAuthStore() {
     const storedJwt = sessionStorage.getItem('jwt');
     const storedSessionId = sessionStorage.getItem('session_id');
     const storedUsername = sessionStorage.getItem('username');
+    const storedUserId = sessionStorage.getItem('user_id');
     
     if (storedJwt && storedSessionId) {
       set({
         isAuthenticated: true,
         username: storedUsername,
+        userId: storedUserId ? parseInt(storedUserId) : null,
         jwt: storedJwt,
         sessionId: storedSessionId
       });
@@ -26,15 +29,19 @@ function createAuthStore() {
 
   return {
     subscribe,
-    login: (username, jwt, sessionId) => {
+    login: (username, jwt, sessionId, userId = null) => {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('jwt', jwt);
         sessionStorage.setItem('session_id', sessionId);
         sessionStorage.setItem('username', username);
+        if (userId) {
+          sessionStorage.setItem('user_id', userId.toString());
+        }
       }
       set({
         isAuthenticated: true,
         username,
+        userId,
         jwt,
         sessionId
       });
@@ -44,10 +51,12 @@ function createAuthStore() {
         sessionStorage.removeItem('jwt');
         sessionStorage.removeItem('session_id');
         sessionStorage.removeItem('username');
+        sessionStorage.removeItem('user_id');
       }
       set({
         isAuthenticated: false,
         username: null,
+        userId: null,
         jwt: null,
         sessionId: null
       });
