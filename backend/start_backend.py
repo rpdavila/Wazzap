@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db
@@ -21,6 +21,11 @@ from schema import (
     MessageCreate, MessageOut,
 )
 import bcrypt
+
+from connection_manager import ConnectionManager
+from starlette.concurrency import run_in_threadpool
+
+manager = ConnectionManager()
 
 app = FastAPI(title="Wazzap Backend")
 # -------------------------------
@@ -146,3 +151,86 @@ def upload_media(file: UploadFile = File(...)):
 @app.get("/")
 def read_root():
     return {"message": "Wazzap Backend Running!"}
+
+# -------------------------------
+# WEBSOCKET
+# -------------------------------
+
+from fastapi import WebSocket, WebSocketDisconnect
+import json
+
+
+@app.websocket("/ws/{chat_id}/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, chat_id: int, user_id: int, db: Session = Depends(get_db)):
+    # Offload initial validation to threads
+    chat = await run_in_threadpool(get_chat, db, chat_id)
+    members = await run_in_threadpool(get_chat_members, db, chat_id)
+    member_ids = [m.user_id for m in members]
+
+    if not chat or user_id not in member_ids:
+        await websocket.accept()
+        if not chat:
+            await websocket.send_text(json.dumps({"error": "Chat not found"}))
+        else:
+            if user_id not in member_ids:
+                await websocket.send_text(json.dumps({"error": "Not a member"}))
+                return
+
+        # Removed unnecessary close() and return
+        # await websocket.close()
+        return
+
+    await manager.connect(websocket, chat_id)
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+
+            # Parse incoming JSON
+            try:
+                payload = json.loads(data)
+                msg_type = payload.get("type", "text")  # "text" or "media"
+                content = payload.get("content", None)
+                media_url = payload.get("media_url", None)
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({"error": "Invalid JSON"}))
+                continue
+
+            # Allow client to quit
+            if msg_type == "control" and content == "quit":
+                await manager.disconnect(websocket, chat_id)
+                print(f"User {user_id} disconnected from chat {chat_id}")
+                break
+
+            # New check: User still member?
+            members = await run_in_threadpool(get_chat_members, db, chat_id)
+            member_ids = [m.user_id for m in members]
+            if user_id not in member_ids:
+                await websocket.send_text(json.dumps({"error": "Not a member"}))
+                continue
+
+            # Offload DB insertion to a thread
+            message = await run_in_threadpool(
+                create_message,
+                db,
+                chat_id=chat_id,
+                sender_id=user_id,
+                msg_type=msg_type,
+                text=content if msg_type == "text" else None,
+                media_url=media_url if msg_type == "media" else None
+            )
+
+            # Broadcast message to chat members
+            broadcast_data = {
+                "chat_id": chat_id,
+                "sender_id": user_id,
+                "type": msg_type,
+                "content": content,
+                "media_url": media_url,
+                "message_id": message.id
+            }
+            await manager.broadcast(chat_id, json.dumps(broadcast_data))
+
+    except WebSocketDisconnect:
+        await manager.disconnect(websocket, chat_id)
+        print(f"User {user_id} disconnected from chat {chat_id}")
