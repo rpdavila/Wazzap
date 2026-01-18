@@ -11,6 +11,7 @@
   let pin = '';
   let error = '';
   let loading = false;
+  let isRegisterMode = false;
 
   function goToDebug() {
     currentView.set('debug');
@@ -109,7 +110,11 @@
 
   function handleKeyPress(event) {
     if (event.key === 'Enter' && !loading) {
-      handleLogin();
+      if (isRegisterMode) {
+        handleRegister();
+      } else {
+        handleLogin();
+      }
     }
   }
 
@@ -118,12 +123,112 @@
       error = '';
     }
   }
+
+  function handlePinInput(event) {
+    // Only allow numbers
+    const value = event.target.value.replace(/\D/g, '');
+    // Limit to 8 digits
+    pin = value.slice(0, 8);
+    clearError();
+  }
+
+  function toggleMode() {
+    isRegisterMode = !isRegisterMode;
+    error = '';
+    username = '';
+    pin = '';
+  }
+
+  async function handleRegister() {
+    if (!username.trim() || !pin.trim()) {
+      error = 'Please enter both username and PIN';
+      return;
+    }
+
+    // Validate PIN length (4-8 digits)
+    if (pin.length < 4 || pin.length > 8) {
+      error = 'PIN must be between 4 and 8 digits';
+      return;
+    }
+
+    // Validate username length (3-64 characters)
+    if (username.trim().length < 3 || username.trim().length > 64) {
+      error = 'Username must be between 3 and 64 characters';
+      return;
+    }
+
+    error = '';
+    loading = true;
+
+    try {
+      // Register the user
+      await api.register(username.trim(), pin);
+      
+      // Auto-login after successful registration
+      let response;
+      
+      // Development bypass: allow admin/0000 without server check
+      if (username.trim().toLowerCase() === 'admin' && pin === '0000') {
+        const mockJwt = 'dev-mock-jwt-' + Date.now();
+        const mockSessionId = 'dev-session-' + Date.now();
+        response = {
+          jwt: mockJwt,
+          session_id: mockSessionId
+        };
+      } else {
+        response = await api.login(username.trim(), pin);
+      }
+      
+      // Check if response has required fields
+      if (!response || !response.jwt || !response.session_id) {
+        throw new Error('Invalid response from server. Missing authentication tokens.');
+      }
+      
+      auth.login(username.trim(), response.jwt, response.session_id, response.user_id);
+      
+      // Connect WebSocket
+      connectWebSocket();
+      
+      // Fetch chats
+      await loadChats();
+      
+      // Clear any previous message data
+      messages.clear();
+      activeChatId.set(null);
+      
+    } catch (err) {
+      console.error('Registration error:', err);
+      if (err instanceof ApiError) {
+        if (err.status === 400) {
+          error = err.message || 'Registration failed. Username may already exist.';
+        } else if (err.status === 408 || err.message.includes('timeout')) {
+          error = 'Request timed out. The server is not responding. Please check your connection and ensure the server is running.';
+        } else if (err.status >= 500) {
+          error = 'Server error. Please try again later or contact support.';
+        } else {
+          error = err.message || 'Registration failed. Please try again.';
+        }
+      } else if (err instanceof Error) {
+        if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('network'))) {
+          error = 'Unable to connect to the server. Please check your internet connection and ensure the server is running.';
+        } else if (err.message) {
+          error = err.message;
+        } else {
+          error = 'Registration failed. Please try again.';
+        }
+      } else {
+        error = 'Registration failed. Please try again.';
+      }
+    } finally {
+      loading = false;
+    }
+  }
 </script>
 
 <div class="login-container">
   <div class="login-box">
-    <h1>Chat Login</h1>
-    <form on:submit|preventDefault={handleLogin}>
+    <h1>{isRegisterMode ? 'Quick Register' : 'Chat Login'}</h1>
+    <form on:submit|preventDefault={isRegisterMode ? handleRegister : handleLogin}>
       <div class="form-group">
         <label for="username">Username</label>
         <input
@@ -134,18 +239,23 @@
           on:input={clearError}
           disabled={loading}
           autocomplete="username"
+          placeholder={isRegisterMode ? "Choose a username (3-64 chars)" : ""}
         />
       </div>
       <div class="form-group">
-        <label for="pin">PIN</label>
+        <label for="pin">PIN {isRegisterMode ? '(4-8 digits)' : ''}</label>
         <input
           id="pin"
-          type="password"
-          bind:value={pin}
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          value={pin}
+          on:input={handlePinInput}
           on:keypress={handleKeyPress}
-          on:input={clearError}
           disabled={loading}
-          autocomplete="current-password"
+          autocomplete={isRegisterMode ? "new-password" : "current-password"}
+          placeholder={isRegisterMode ? "Enter 4-8 digit PIN" : ""}
+          maxlength="8"
         />
       </div>
       {#if error}
@@ -154,8 +264,21 @@
         </div>
       {/if}
       <button type="submit" disabled={loading}>
-        {loading ? 'Logging in...' : 'Login'}
+        {loading 
+          ? (isRegisterMode ? 'Registering...' : 'Logging in...') 
+          : (isRegisterMode ? 'Register' : 'Login')}
       </button>
+      <div class="mode-toggle">
+        {#if isRegisterMode}
+          <button type="button" class="link-button" on:click={toggleMode}>
+            Already have an account? Login
+          </button>
+        {:else}
+          <button type="button" class="link-button register-link" on:click={toggleMode}>
+            <span>Register - quick in 15s!</span>
+          </button>
+        {/if}
+      </div>
       <div class="debug-link">
         <button type="button" class="link-button" on:click={goToDebug}>
           <svg class="debug-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -272,8 +395,13 @@
     cursor: not-allowed;
   }
 
-  .debug-link {
+  .mode-toggle {
     margin-top: 0.75rem;
+    text-align: center;
+  }
+
+  .debug-link {
+    margin-top: 0.5rem;
     text-align: center;
   }
 
@@ -283,7 +411,7 @@
     border: none;
     color: #6b7280;
     text-decoration: none;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     cursor: pointer;
     padding: 0;
     margin: 0;
@@ -292,17 +420,32 @@
     align-items: center;
     gap: 0.375rem;
     font-weight: 400;
-    transition: none;
+    transition: color 0.2s;
   }
 
   .link-button:hover {
     background: none !important;
     background-color: transparent !important;
+    color: #4a90e2;
+  }
+
+  .register-link {
+    color: #4a90e2;
+    font-weight: 500;
+  }
+
+  .register-link:hover {
+    color: #357abd;
   }
 
   .debug-icon {
     width: 12px;
     height: 12px;
     flex-shrink: 0;
+  }
+
+  .form-group input[inputmode="numeric"] {
+    font-family: monospace;
+    letter-spacing: 0.1em;
   }
 </style>

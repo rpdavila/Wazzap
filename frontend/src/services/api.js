@@ -90,6 +90,14 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
+  async register(username, pin) {
+    const response = await request('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, pin })
+    });
+    return response;
+  },
+
   async login(username, pin) {
     const response = await request('/api/auth/login', {
       method: 'POST',
