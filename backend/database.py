@@ -2,9 +2,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 import os
+from pathlib import Path
 
 # Load variables from .env
-load_dotenv()
+# Try root directory first (parent of backend), then backend directory
+root_dir = Path(__file__).parent.parent
+backend_dir = Path(__file__).parent
+# Load from root .env first, then backend/.env (root takes precedence)
+load_dotenv(root_dir / ".env")
+load_dotenv(backend_dir / ".env", override=False)  # Don't override root .env values
 
 # Get the DATABASE_URL from the environment
 DATABASE_URL = os.getenv("DATABASE_URL")

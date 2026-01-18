@@ -12,6 +12,16 @@
   let error = '';
   let loading = false;
   let isRegisterMode = false;
+  let sessionRevalidationMessage = false;
+  
+  // Check for session revalidation message on mount
+  if (typeof window !== 'undefined') {
+    const hasMessage = sessionStorage.getItem('session_revalidation_message');
+    if (hasMessage === 'true') {
+      sessionRevalidationMessage = true;
+      sessionStorage.removeItem('session_revalidation_message');
+    }
+  }
 
   function goToDebug() {
     currentView.set('debug');
@@ -228,6 +238,12 @@
 <div class="login-container">
   <div class="login-box">
     <h1>{isRegisterMode ? 'Quick Register' : 'Chat Login'}</h1>
+    {#if sessionRevalidationMessage}
+      <div class="info-message" role="alert">
+        <strong>Session Revalidation Required</strong>
+        <p>Your session has expired for security purposes. Please log in again to continue.</p>
+      </div>
+    {/if}
     <form on:submit|preventDefault={isRegisterMode ? handleRegister : handleLogin}>
       <div class="form-group">
         <label for="username">Username</label>
@@ -360,6 +376,29 @@
   .error strong {
     display: block;
     margin-bottom: 0.25rem;
+  }
+
+  .info-message {
+    color: #1976d2;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background-color: #e3f2fd;
+    border: 1px solid #1976d2;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    display: block;
+    animation: fadeIn 0.3s ease-in;
+  }
+
+  .info-message strong {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+  }
+
+  .info-message p {
+    margin: 0;
+    line-height: 1.5;
   }
 
   @keyframes fadeIn {

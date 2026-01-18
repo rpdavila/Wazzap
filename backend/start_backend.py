@@ -1,8 +1,10 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, APIRouter, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, APIRouter, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db, engine, Base, SessionLocal
+from pathlib import Path
 from crud import (
     create_user,
     get_user_by_username,
@@ -32,11 +34,20 @@ import threading
 import sys
 import logging
 from dotenv import load_dotenv
+from pathlib import Path
 
 from connection_manager import ConnectionManager
 from starlette.concurrency import run_in_threadpool
 
-load_dotenv()
+# Load .env from root directory first (takes precedence), then backend/.env as fallback
+root_dir = Path(__file__).parent.parent
+backend_dir = Path(__file__).parent
+load_dotenv(root_dir / ".env")
+load_dotenv(backend_dir / ".env", override=False)  # Don't override root .env values
+
+# Create media uploads directory
+MEDIA_DIR = Path(__file__).parent / "media"
+MEDIA_DIR.mkdir(exist_ok=True)
 
 # ==================== LOGGING CONFIGURATION ====================
 # Custom formatter for categorized logging
@@ -105,6 +116,10 @@ logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
 
 # Suppress uvicorn access logs (we'll use our own)
 logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
+
+# In-memory session store (cleared on server restart)
+# Format: {session_id: {"jwt": jwt_token, "user_id": user_id, "username": username}}
+active_sessions: dict[str, dict] = {}
 
 manager = ConnectionManager()
 
@@ -225,6 +240,9 @@ def create_tables():
     # This will create all tables defined in models.py if they don't exist
     Base.metadata.create_all(bind=engine)
     db_logger.info("Database tables initialized")
+    # Clear all sessions on startup (sessions don't survive server restart)
+    active_sessions.clear()
+    auth_logger.info("All sessions cleared (server restart)")
 
 # Add CORS middleware
 app.add_middleware(
@@ -307,7 +325,14 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
     jwt_token = secrets.token_urlsafe(32)
     session_id = secrets.token_urlsafe(16)
     
-    auth_logger.info(f"User logged in: {user.username} (ID: {db_user.id})")
+    # Store session in memory (will be cleared on server restart)
+    active_sessions[session_id] = {
+        "jwt": jwt_token,
+        "user_id": db_user.id,
+        "username": db_user.username
+    }
+    
+    auth_logger.info(f"User logged in: {user.username} (ID: {db_user.id}), session_id={session_id}")
     return {
         "jwt": jwt_token,
         "session_id": session_id,
@@ -321,7 +346,12 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
     description="Logout the current user session.",
     tags=["Authentication"]
 )
-def logout():
+def logout(session_id: str = Query(..., description="Session ID")):
+    """Logout and invalidate the session."""
+    if session_id in active_sessions:
+        username = active_sessions[session_id].get("username", "unknown")
+        del active_sessions[session_id]
+        auth_logger.info(f"User logged out: {username}, session_id={session_id}")
     return {"message": "Logout successful"}
 
 
@@ -624,9 +654,49 @@ def get_chat_messages(chat_id: int, db: Session = Depends(get_db)):
     """,
     tags=["Media"]
 )
-def upload_media(file: UploadFile = File(...)):
-    # TODO: save to disk/cloud
-    return {"filename": file.filename}
+def upload_media(request: Request, file: UploadFile = File(...)):
+    # #region agent log
+    import json as json_lib
+    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:633","message":"upload_media called","data":{"filename":file.filename,"content_type":file.content_type},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+    # #endregion
+    
+    # Generate unique filename
+    import uuid
+    file_ext = Path(file.filename).suffix if file.filename else '.jpg'
+    unique_filename = f"{uuid.uuid4()}{file_ext}"
+    file_path = MEDIA_DIR / unique_filename
+    
+    # Save file to disk
+    try:
+        with open(file_path, "wb") as buffer:
+            content = file.file.read()
+            buffer.write(content)
+        # #region agent log
+        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"start_backend.py:648","message":"File saved to disk","data":{"filePath":str(file_path),"fileSize":len(content)},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        # #endregion
+    except Exception as e:
+        # #region agent log
+        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"start_backend.py:651","message":"File save error","data":{"error":str(e)},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        # #endregion
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+    
+    # Generate media URL (absolute URL if request available, otherwise relative)
+    if request:
+        base_url = str(request.base_url).rstrip('/')
+        media_url = f"{base_url}/api/media/{unique_filename}"
+    else:
+        # Fallback: use config API URL or relative path
+        api_url = os.getenv("API_URL", "http://localhost:8000")
+        media_url = f"{api_url}/api/media/{unique_filename}"
+    result = {"media_url": media_url, "filename": unique_filename}
+    # #region agent log
+    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:665","message":"upload_media returning","data":{"result":result,"hasMediaUrl":"media_url" in result,"mediaUrl":media_url},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+    # #endregion
+    return result
 
 
 # -------------------------------
@@ -809,6 +879,9 @@ def read_root():
 # Include API router
 app.include_router(api_router)
 
+# Mount static files for media
+app.mount("/api/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+
 # -------------------------------
 # WEBSOCKET
 # -------------------------------
@@ -823,8 +896,18 @@ async def websocket_endpoint(
     token: str = Query(..., description="JWT token"),
     session_id: str = Query(..., description="Session ID")
 ):
-    # For now, we'll accept the connection and handle chat_id/user_id from messages
-    # In production, you'd validate the token and extract user_id from it
+    # Validate session - reject if session doesn't exist (e.g., after server restart)
+    if session_id not in active_sessions:
+        ws_logger.warning(f"WebSocket connection rejected: invalid session_id={session_id}")
+        await websocket.close(code=1008, reason="Invalid session. Please log in again.")
+        return
+    
+    session = active_sessions[session_id]
+    if session["jwt"] != token:
+        ws_logger.warning(f"WebSocket connection rejected: invalid token for session_id={session_id}")
+        await websocket.close(code=1008, reason="Invalid token. Please log in again.")
+        return
+    
     await websocket.accept()
     
     # Create database session for this WebSocket connection
@@ -836,17 +919,12 @@ async def websocket_endpoint(
             "type": "session.ready",
             "session_id": session_id
         }))
-        ws_logger.info(f"WebSocket connected: session_id={session_id}")
+        ws_logger.info(f"WebSocket connected: session_id={session_id}, user_id={session['user_id']}")
         
         while True:
             try:
                 data = await websocket.receive_text()
             except Exception as e:
-                # #region agent log
-                import json as json_lib
-                with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                    f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"start_backend.py:842","message":"Error receiving websocket message","data":{"session_id":session_id,"error":str(e),"error_type":type(e).__name__},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-                # #endregion
                 ws_logger.error(f"Error receiving WebSocket message: {e}")
                 break
             
@@ -916,11 +994,6 @@ async def websocket_endpoint(
                         preview = content[:30] + "..." if content and len(content) > 30 else content or "[media]"
                         ws_logger.info(f"Message sent via WS: chat_id={chat_id}, sender_id={sender_id}, preview='{preview}'")
                     except Exception as e:
-                        # #region agent log
-                        import json as json_lib
-                        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"F","location":"start_backend.py:866","message":"Error in message.send","data":{"session_id":session_id,"chat_id":chat_id,"sender_id":sender_id,"error":str(e),"error_type":type(e).__name__},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-                        # #endregion
                         ws_logger.error(f"Error processing message.send: {e}", exc_info=True)
                         try:
                             await websocket.send_text(json.dumps({"error": "Failed to send message"}))
@@ -947,26 +1020,12 @@ async def websocket_endpoint(
                 
     except WebSocketDisconnect:
         # Disconnect from all chats
-        # #region agent log
-        import json as json_lib
-        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:927","message":"WebSocketDisconnect caught","data":{"session_id":session_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-        # #endregion
         try:
             await manager.disconnect(websocket, None)
         except Exception as e:
-            # #region agent log
-            with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:930","message":"Error in disconnect with None","data":{"session_id":session_id,"error":str(e),"error_type":type(e).__name__},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-            # #endregion
             ws_logger.error(f"Error disconnecting WebSocket: {e}")
         ws_logger.info(f"WebSocket disconnected: session_id={session_id}")
     except Exception as e:
-        # #region agent log
-        import json as json_lib
-        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"start_backend.py:937","message":"Unexpected exception in websocket endpoint","data":{"session_id":session_id,"error":str(e),"error_type":type(e).__name__},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-        # #endregion
         ws_logger.error(f"Unexpected error in WebSocket endpoint: {e}", exc_info=True)
         try:
             await manager.disconnect(websocket, None)
@@ -977,10 +1036,6 @@ async def websocket_endpoint(
         try:
             db.close()
         except Exception as e:
-            # #region agent log
-            with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"start_backend.py:947","message":"Error closing database session","data":{"session_id":session_id,"error":str(e)},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-            # #endregion
             ws_logger.error(f"Error closing database session: {e}")
 
 # Legacy WebSocket endpoint for backward compatibility

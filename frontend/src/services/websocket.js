@@ -130,6 +130,7 @@ export function connectWebSocket() {
   
   try {
     socket = new WebSocket(wsUrl);
+    let connectionRejected = false;
     
     socket.onopen = () => {
       console.log('WebSocket connected');
@@ -142,12 +143,42 @@ export function connectWebSocket() {
     
     socket.onerror = (error) => {
       console.error('WebSocket error:', error);
+      // Check if connection was rejected (e.g., 403 Forbidden)
+      // This happens when the server rejects the connection before it opens
+      if (socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+        // Connection was rejected, likely due to invalid session
+        console.log('WebSocket connection rejected, session may be invalid');
+        connectionRejected = true;
+      }
     };
     
     socket.onclose = (event) => {
       console.log('WebSocket closed', event.code, event.reason);
       websocket.set({ connected: false, socket: null });
       stopHeartbeat();
+      
+      // Check if session was invalidated (e.g., after server restart)
+      // 1008 = Policy violation (server uses this for invalid session)
+      // 1003 = Invalid data (can indicate 403 rejection during handshake)
+      // Also check if connection was rejected before opening
+      const isSessionInvalid = 
+        (event.code === 1008 && event.reason && (
+          event.reason.includes('Invalid session') || 
+          event.reason.includes('Please log in again')
+        )) ||
+        (event.code === 1008 && connectionRejected) ||
+        (event.code === 1003 && connectionRejected) ||
+        (connectionRejected && event.code !== 1000);
+      
+      if (isSessionInvalid) {
+        console.log('Session invalidated, clearing auth and redirecting to login...');
+        // Store message for login page
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('session_revalidation_message', 'true');
+        }
+        auth.logout();
+        return; // Don't attempt to reconnect
+      }
       
       // Attempt to reconnect if not a normal closure
       if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
