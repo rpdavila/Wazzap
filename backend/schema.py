@@ -51,6 +51,11 @@ class ChatBase(BaseModel):
     title: Optional[str] = None
 
 
+class GroupChatCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=128, description="Group chat title")
+    member_ids: list[int] = Field(min_length=1, description="List of user IDs to add to the group")
+
+
 class ChatOut(ChatBase):
     id: int
     created_at: datetime
@@ -73,6 +78,16 @@ class ChatMemberOut(ChatMemberBase):
     user_id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ChatMemberWithUser(ChatMemberOut):
+    username: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AddMemberRequest(BaseModel):
+    user_id: int
 
 
 # -----------------------

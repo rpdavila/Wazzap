@@ -12,6 +12,9 @@
   let loading = false;
   let error = '';
   let searchQuery = '';
+  let showGroupChatModal = false;
+  let groupChatTitle = '';
+  let selectedMembers = new Set();
 
   $: filteredUsers = users.filter(user => 
     user.id !== $auth.userId && 
@@ -79,6 +82,74 @@
   function goToChats() {
     currentView.set('chats');
   }
+
+  function openGroupChatModal() {
+    showGroupChatModal = true;
+    groupChatTitle = '';
+    selectedMembers.clear();
+  }
+
+  function closeGroupChatModal() {
+    showGroupChatModal = false;
+    groupChatTitle = '';
+    selectedMembers.clear();
+  }
+
+  function toggleMemberSelection(userId) {
+    if (selectedMembers.has(userId)) {
+      selectedMembers.delete(userId);
+    } else {
+      selectedMembers.add(userId);
+    }
+    selectedMembers = selectedMembers; // Trigger reactivity
+  }
+
+  async function createGroupChat() {
+    if (!groupChatTitle.trim()) {
+      error = 'Please enter a group chat title';
+      return;
+    }
+
+    if (selectedMembers.size === 0) {
+      error = 'Please select at least one member';
+      return;
+    }
+
+    try {
+      error = '';
+      const memberIds = Array.from(selectedMembers);
+      // Include current user in the group
+      memberIds.push($auth.userId);
+      
+      const newChat = await api.createGroupChat(groupChatTitle.trim(), memberIds);
+      
+      // Add to chats list
+      chats.update(chatsList => {
+        if (!chatsList.find(c => c.id === newChat.id)) {
+          return [...chatsList, newChat];
+        }
+        return chatsList;
+      });
+
+      // Select the chat
+      activeChatId.set(newChat.id);
+      
+      // Switch to chats view
+      currentView.set('chats');
+      
+      // Open chat via WebSocket
+      sendWebSocketMessage('chat.open', { 
+        chat_id: newChat.id,
+        user_id: $auth.userId
+      });
+
+      // Close modal
+      closeGroupChatModal();
+    } catch (err) {
+      console.error('Failed to create group chat:', err);
+      error = err.message || 'Failed to create group chat. Please try again.';
+    }
+  }
 </script>
 
 <div class="dashboard">
@@ -99,6 +170,9 @@
       />
       <button class="refresh-button" on:click={loadUsers} disabled={loading}>
         {loading ? 'Loading...' : '🔄 Refresh'}
+      </button>
+      <button class="group-chat-button" on:click={openGroupChatModal}>
+        👥 New Group
       </button>
     </div>
 
@@ -135,6 +209,66 @@
     {/if}
   </div>
 </div>
+
+{#if showGroupChatModal}
+  <div class="modal-overlay" on:click={closeGroupChatModal}>
+    <div class="modal-content" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>Create Group Chat</h3>
+        <button class="modal-close" on:click={closeGroupChatModal}>×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="group-title">Group Name</label>
+          <input
+            id="group-title"
+            type="text"
+            class="form-input"
+            bind:value={groupChatTitle}
+            placeholder="Enter group name..."
+            maxlength="128"
+          />
+        </div>
+        <div class="form-group">
+          <label>Select Members ({selectedMembers.size} selected)</label>
+          <div class="members-list">
+            {#each filteredUsers as user (user.id)}
+              <div 
+                class="member-item"
+                class:selected={selectedMembers.has(user.id)}
+                on:click={() => toggleMemberSelection(user.id)}
+                role="button"
+                tabindex="0"
+                on:keypress={(e) => e.key === 'Enter' && toggleMemberSelection(user.id)}
+              >
+                <div class="member-avatar">
+                  {user.username.charAt(0).toUpperCase()}
+                </div>
+                <div class="member-name">{user.username}</div>
+                {#if selectedMembers.has(user.id)}
+                  <div class="checkmark">✓</div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </div>
+        {#if error}
+          <div class="error-message">{error}</div>
+        {/if}
+      </div>
+      <div class="modal-footer">
+        <button class="cancel-button" on:click={closeGroupChatModal}>Cancel</button>
+        <button 
+          class="create-button" 
+          on:click={createGroupChat}
+          disabled={!groupChatTitle.trim() || selectedMembers.size === 0}
+        >
+          Create Group
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .dashboard {
@@ -216,6 +350,22 @@
   .refresh-button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .group-chat-button {
+    padding: 0.75rem 1rem;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    transition: background-color 0.2s;
+  }
+
+  .group-chat-button:hover {
+    background-color: #218838;
   }
 
   .error-message {
@@ -315,5 +465,189 @@
 
   .chat-button:hover {
     background-color: #357abd;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-content {
+    background-color: white;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid #e0e0e0;
+  }
+
+  .modal-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #333;
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-close:hover {
+    color: #333;
+  }
+
+  .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+  }
+
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #333;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+    box-sizing: border-box;
+  }
+
+  .form-input:focus {
+    outline: none;
+    border-color: #4a90e2;
+  }
+
+  .members-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+  }
+
+  .member-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .member-item:last-child {
+    border-bottom: none;
+  }
+
+  .member-item:hover {
+    background-color: #f5f5f5;
+  }
+
+  .member-item.selected {
+    background-color: #e3f2fd;
+  }
+
+  .member-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: #4a90e2;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+
+  .member-name {
+    flex: 1;
+    font-weight: 500;
+    color: #333;
+  }
+
+  .checkmark {
+    color: #4a90e2;
+    font-weight: bold;
+    font-size: 1.25rem;
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 1rem;
+    border-top: 1px solid #e0e0e0;
+  }
+
+  .cancel-button,
+  .create-button {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .cancel-button {
+    background-color: #f5f5f5;
+    color: #333;
+  }
+
+  .cancel-button:hover {
+    background-color: #e9ecef;
+  }
+
+  .create-button {
+    background-color: #28a745;
+    color: white;
+  }
+
+  .create-button:hover:not(:disabled) {
+    background-color: #218838;
+  }
+
+  .create-button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
   }
 </style>

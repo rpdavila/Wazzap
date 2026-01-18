@@ -24,6 +24,23 @@ class ConnectionManager:
         if user_id is not None:
             self.user_connections[user_id] = websocket
 
+    async def send_to_user(self, user_id: int, message: str):
+        """
+        Send a message to a specific user if they're connected.
+        This is an async method that should be called from an async context.
+        """
+        if user_id in self.user_connections:
+            websocket = self.user_connections[user_id]
+            try:
+                await websocket.send_text(message)
+                return True
+            except Exception as e:
+                # Connection might be closed, remove it
+                if user_id in self.user_connections:
+                    del self.user_connections[user_id]
+                return False
+        return False
+
     async def disconnect(self, websocket: WebSocket, chat_id: int = None, user_id: Optional[int] = None):
         if chat_id is None:
             # Disconnect from all chats

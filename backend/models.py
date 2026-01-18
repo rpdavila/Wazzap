@@ -58,8 +58,8 @@ class Message(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     chat_id = Column(Integer, ForeignKey("chats.id"), nullable=False)
-    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    type = Column(String(16), nullable=False)  # "text" or "media"
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Nullable for system messages
+    type = Column(String(16), nullable=False)  # "text", "media", or "system"
     text = Column(String(1024), nullable=True)
     media_url = Column(String(1024), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

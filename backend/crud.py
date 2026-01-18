@@ -67,6 +67,43 @@ def get_chat_members(db: Session, chat_id: int) -> list[type[ChatMember]]:
     return db.query(ChatMember).filter(ChatMember.chat_id == chat_id).all()
 
 
+def remove_member_from_chat(db: Session, chat_id: int, user_id: int) -> bool:
+    """
+    Remove a member from a chat.
+    Returns True if member was removed, False if member was not found.
+    """
+    member = db.query(ChatMember).filter(
+        ChatMember.chat_id == chat_id,
+        ChatMember.user_id == user_id
+    ).first()
+    
+    if not member:
+        return False
+    
+    db.delete(member)
+    db.commit()
+    return True
+
+
+def get_chat_members_with_users(db: Session, chat_id: int) -> list[dict]:
+    """
+    Get chat members with user information.
+    Returns a list of dictionaries with member and user data.
+    """
+    members = db.query(ChatMember).filter(ChatMember.chat_id == chat_id).all()
+    result = []
+    for member in members:
+        user = get_user(db, member.user_id)
+        result.append({
+            "chat_id": member.chat_id,
+            "user_id": member.user_id,
+            "username": user.username if user else None,
+            "last_seen_at": member.last_seen_at,
+            "active_chat_id": member.active_chat_id
+        })
+    return result
+
+
 def find_existing_dm(db: Session, user1_id: int, user2_id: int) -> Optional[Chat]:
     """
     Find an existing direct message chat between two users.
@@ -163,7 +200,7 @@ def update_last_seen(db: Session, chat_id: int, user_id: int, last_message_id: O
 def create_message(
     db: Session,
     chat_id: int,
-    sender_id: int,
+    sender_id: Optional[int],  # Can be None for system messages
     msg_type: str,
     text: Optional[str] = None,
     media_url: Optional[str] = None

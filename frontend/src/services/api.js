@@ -177,5 +177,29 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ user1_id: user1Id, user2_id: user2Id })
     });
+  },
+
+  async createGroupChat(title, memberIds) {
+    return request('/api/chats/group', {
+      method: 'POST',
+      body: JSON.stringify({ title, member_ids: memberIds })
+    });
+  },
+
+  async getChatMembers(chatId) {
+    return request(`/api/chats/${chatId}/members`);
+  },
+
+  async addMemberToChat(chatId, userId) {
+    return request(`/api/chats/${chatId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId })
+    });
+  },
+
+  async removeMemberFromChat(chatId, userId) {
+    return request(`/api/chats/${chatId}/members/${userId}`, {
+      method: 'DELETE'
+    });
   }
 };

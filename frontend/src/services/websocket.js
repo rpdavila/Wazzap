@@ -53,6 +53,10 @@ function handleWebSocketEvent(event) {
         handleMessageReadUpdate(data);
         break;
       
+      case 'chat.member.added':
+        handleChatMemberAdded(data);
+        break;
+      
       case 'presence.update':
         // Handle presence updates if needed
         break;
@@ -233,6 +237,21 @@ function handleMessageReadUpdate(data) {
   // #endregion
 }
 
+async function handleChatMemberAdded(data) {
+  console.log('Received chat.member.added notification:', data);
+  const { chat_id, chat_title, chat_type } = data;
+  
+  // Reload the chat list to include the new group chat
+  try {
+    const chatsList = await api.getChats();
+    console.log('Reloading chat list, new chats:', chatsList.length);
+    chats.set(chatsList);
+    console.log('Chat list reloaded after being added to group chat:', chat_id, chat_title);
+  } catch (err) {
+    console.error('Failed to reload chats after being added to group:', err);
+  }
+}
+
 function markMessagesAsRead(chatId, lastMessageId) {
   // #region agent log
   fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:227',message:'markMessagesAsRead called',data:{chatId,lastMessageId,chatIdIsNull:chatId === null || chatId === undefined,lastMessageIdIsNull:lastMessageId === null || lastMessageId === undefined,chatIdType:typeof chatId,lastMessageIdType:typeof lastMessageId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
@@ -307,8 +326,9 @@ export function connectWebSocket() {
       // Check if connection was rejected (e.g., 403 Forbidden)
       // This happens when the server rejects the connection before it opens
       if (socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
-        // Connection was rejected, likely due to invalid session
-        console.log('WebSocket connection rejected, session may be invalid');
+        // Connection was rejected - could be invalid session or server restart
+        // Don't mark as invalid immediately, let onclose handle it based on the close code
+        console.log('WebSocket connection rejected');
         connectionRejected = true;
       }
     };
@@ -318,21 +338,21 @@ export function connectWebSocket() {
       websocket.set({ connected: false, socket: null });
       stopHeartbeat();
       
-      // Check if session was invalidated (e.g., after server restart)
-      // 1008 = Policy violation (server uses this for invalid session)
+      // Check if session was explicitly invalidated (not just server restart)
+      // 1008 = Policy violation (server uses this for explicitly invalid session)
+      // 1001 = Going Away (server uses this for server restarts - session expired)
       // 1003 = Invalid data (can indicate 403 rejection during handshake)
-      // Also check if connection was rejected before opening
-      const isSessionInvalid = 
+      const isSessionExplicitlyInvalid = 
         (event.code === 1008 && event.reason && (
           event.reason.includes('Invalid session') || 
+          event.reason.includes('Invalid token') ||
           event.reason.includes('Please log in again')
-        )) ||
-        (event.code === 1008 && connectionRejected) ||
-        (event.code === 1003 && connectionRejected) ||
-        (connectionRejected && event.code !== 1000);
+        ));
       
-      if (isSessionInvalid) {
-        console.log('Session invalidated, clearing auth and redirecting to login...');
+      // For server restarts (1001 = Going Away, 1006 = abnormal closure), try to reconnect
+      // Only logout if we get an explicit "Invalid session" or "Invalid token" message (1008)
+      if (isSessionExplicitlyInvalid) {
+        console.log('Session explicitly invalidated, clearing auth and redirecting to login...');
         // Store message for login page
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('session_revalidation_message', 'true');
@@ -342,15 +362,20 @@ export function connectWebSocket() {
       }
       
       // Attempt to reconnect if not a normal closure
+      // This handles server restarts, network issues, etc.
       if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
         reconnectAttempts++;
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
-        console.log(`Reconnecting in ${delay}ms...`);
+        console.log(`WebSocket closed (code: ${event.code}). Reconnecting in ${delay}ms... (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
         setTimeout(() => {
           if (get(auth).isAuthenticated) {
             connectWebSocket();
           }
         }, delay);
+      } else if (reconnectAttempts >= maxReconnectAttempts) {
+        console.error('Max reconnection attempts reached. Please refresh the page.');
+        // Don't logout, just show that connection failed
+        // User can manually refresh if needed
       }
     };
   } catch (error) {

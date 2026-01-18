@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, APIRouter, Query, Request
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, APIRouter, Query, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 from database import get_db, engine, Base, SessionLocal
 from pathlib import Path
 from crud import (
@@ -13,6 +14,8 @@ from crud import (
     get_chat,
     add_member_to_chat,
     get_chat_members,
+    get_chat_members_with_users,
+    remove_member_from_chat,
     create_message,
     get_messages_for_chat,
     list_chats_for_user,
@@ -27,8 +30,8 @@ from crud import (
 )
 from schema import (
     UserCreate, UserOut,
-    ChatBase, ChatOut,
-    ChatMemberBase, ChatMemberOut,
+    ChatBase, ChatOut, GroupChatCreate,
+    ChatMemberBase, ChatMemberOut, ChatMemberWithUser, AddMemberRequest,
     MessageCreate, MessageOut,
     AdminAuth, UserUpdate
 )
@@ -497,17 +500,26 @@ def get_chats(
     
     chats = list_chats_for_user(db, user_id)
     
-    # Enrich direct message chats with other_user_name and unread_count
+    # Enrich direct message chats with other_user_name, unread_count, and last_message_at
     enriched_chats = []
     for chat in chats:
         # Calculate unread count for this user in this chat
         unread_count = get_unread_count(db, chat.id, user_id)
+        
+        # Get the last message timestamp for sorting
+        from models import Message
+        last_message = db.query(Message).filter(
+            Message.chat_id == chat.id
+        ).order_by(desc(Message.created_at)).first()
+        
+        last_message_at = last_message.created_at if last_message else chat.created_at
         
         chat_dict = {
             "id": chat.id,
             "type": chat.type,
             "title": chat.title,
             "created_at": chat.created_at,
+            "last_message_at": last_message_at.isoformat() if last_message_at else chat.created_at.isoformat() if chat.created_at else None,
             "other_user_name": None,
             "unread_count": unread_count
         }
@@ -523,6 +535,15 @@ def get_chats(
                     break
         
         enriched_chats.append(chat_dict)
+    
+    # Sort chats by most recent message at the top
+    def sort_key(c):
+        last_msg = c.get("last_message_at") or c.get("created_at") or ""
+        # Convert ISO string to comparable value (newer = larger)
+        timestamp = last_msg.replace("T", " ").replace("Z", "").replace("+00:00", "") if last_msg else ""
+        return timestamp
+    
+    enriched_chats.sort(key=sort_key, reverse=True)  # Reverse=True: newest first
     
     return enriched_chats
 
@@ -536,17 +557,26 @@ def get_chats(
 def get_my_chats(user_id: int, db: Session = Depends(get_db)):
     chats = list_chats_for_user(db, user_id)
     
-    # Enrich direct message chats with other_user_name and unread_count
+    # Enrich direct message chats with other_user_name, unread_count, and last_message_at
     enriched_chats = []
     for chat in chats:
         # Calculate unread count for this user in this chat
         unread_count = get_unread_count(db, chat.id, user_id)
+        
+        # Get the last message timestamp for sorting
+        from models import Message
+        last_message = db.query(Message).filter(
+            Message.chat_id == chat.id
+        ).order_by(desc(Message.created_at)).first()
+        
+        last_message_at = last_message.created_at if last_message else chat.created_at
         
         chat_dict = {
             "id": chat.id,
             "type": chat.type,
             "title": chat.title,
             "created_at": chat.created_at,
+            "last_message_at": last_message_at.isoformat() if last_message_at else chat.created_at.isoformat() if chat.created_at else None,
             "other_user_name": None,
             "unread_count": unread_count
         }
@@ -562,6 +592,15 @@ def get_my_chats(user_id: int, db: Session = Depends(get_db)):
                     break
         
         enriched_chats.append(chat_dict)
+    
+    # Sort chats by most recent message at the top
+    def sort_key(c):
+        last_msg = c.get("last_message_at") or c.get("created_at") or ""
+        # Convert ISO string to comparable value (newer = larger)
+        timestamp = last_msg.replace("T", " ").replace("Z", "").replace("+00:00", "") if last_msg else ""
+        return timestamp
+    
+    enriched_chats.sort(key=sort_key, reverse=True)  # Reverse=True: newest first
     
     return enriched_chats
 
@@ -657,11 +696,17 @@ def create_dm(dm: DMCreate, db: Session = Depends(get_db)):
     "/chats/group",
     response_model=ChatOut,
     summary="Create group chat",
-    description="Create a new group chat with a title.",
+    description="Create a new group chat with a title and initial members.",
     tags=["Chats"]
 )
-def create_group(chat: ChatBase, db: Session = Depends(get_db)):
-    chat_obj = create_chat(db, chat.type.value, chat.title)
+def create_group(group_data: GroupChatCreate, db: Session = Depends(get_db)):
+    # Create the group chat
+    chat_obj = create_chat(db, "group", group_data.title)
+    
+    # Add all members to the chat
+    for user_id in group_data.member_ids:
+        add_member_to_chat(db, chat_obj.id, user_id)
+    
     return chat_obj
 
 @api_router.get(
@@ -683,23 +728,209 @@ def get_chat_by_id(chat_id: int, db: Session = Depends(get_db)):
 # -------------------------------
 @api_router.get(
     "/chats/{chat_id}/members",
-    response_model=list[ChatMemberOut],
     summary="Get chat members",
-    description="Get all members of a specific chat.",
+    description="Get all members of a specific chat with user information.",
     tags=["Chats"]
 )
 def get_members(chat_id: int, db: Session = Depends(get_db)):
-    return get_chat_members(db, chat_id)  # Fixed: use get_chat_members
+    # Check if chat exists
+    chat = get_chat(db, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    # Return members with user information
+    return get_chat_members_with_users(db, chat_id)
 
 @api_router.post(
     "/chats/{chat_id}/members",
-    response_model=ChatMemberOut,
     summary="Add member to chat",
-    description="Add a user as a member to a chat.",
+    description="Add a user as a member to a chat (group chats only).",
     tags=["Chats"]
 )
-def add_member(chat_id: int, member: ChatMemberBase, db: Session = Depends(get_db)):
-    return add_member_to_chat(db, chat_id, member.user_id)
+def add_member(
+    chat_id: int, 
+    member_request: AddMemberRequest, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    # Check if chat exists
+    chat = get_chat(db, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    # Only allow adding members to group chats
+    if chat.type != "group":
+        raise HTTPException(status_code=400, detail="Can only add members to group chats")
+    
+    # Check if user exists
+    user = get_user(db, member_request.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Add member to chat
+    member = add_member_to_chat(db, chat_id, member_request.user_id)
+    
+    # Create a system message indicating the user was added
+    try:
+        added_user = get_user(db, member_request.user_id)
+        added_username = added_user.username if added_user else f"User {member_request.user_id}"
+        
+        # Create a system message
+        system_message = create_message(
+            db=db,
+            chat_id=chat_id,
+            sender_id=None,  # System message
+            msg_type="system",
+            text=f"{added_username} was added to the group"
+        )
+        
+        # Broadcast the system message to all chat members
+        from connection_manager import manager
+        broadcast_data = json.dumps({
+            "type": "message.new",
+            "chat_id": chat_id,
+            "message": {
+                "id": system_message.id,
+                "chat_id": chat_id,
+                "sender_id": None,
+                "sender_username": None,
+                "type": "system",
+                "text": system_message.text,
+                "content": system_message.text,
+                "created_at": system_message.created_at.isoformat() if system_message.created_at else None,
+                "timestamp": system_message.created_at.isoformat() if system_message.created_at else None,
+                "read_by": [],
+                "read_count": 0,
+                "status": None
+            }
+        })
+        
+        # Broadcast in background
+        async def broadcast_message():
+            def get_members_for_broadcast(chat_id):
+                return get_chat_members(db, chat_id)
+            await manager.broadcast(chat_id, broadcast_data, get_members_for_broadcast)
+        
+        background_tasks.add_task(broadcast_message)
+    except Exception as e:
+        ws_logger.warning(f"Failed to create system message for member addition: {e}")
+    
+    # Notify the added user via WebSocket that they've been added to a group chat
+    # This will trigger their frontend to reload the chat list
+    async def send_notification():
+        try:
+            from connection_manager import manager
+            
+            # Get chat details for the notification
+            chat_title = chat.title or f"Group Chat {chat_id}"
+            
+            # Send notification to the added user
+            notification_data = json.dumps({
+                "type": "chat.member.added",
+                "chat_id": chat_id,
+                "chat_title": chat_title,
+                "chat_type": chat.type
+            })
+            
+            # Use the connection manager's send_to_user method
+            success = await manager.send_to_user(member_request.user_id, notification_data)
+            if success:
+                ws_logger.info(f"Notified user {member_request.user_id} about being added to chat {chat_id}")
+            else:
+                ws_logger.debug(f"User {member_request.user_id} not connected via WebSocket, cannot send notification")
+        except Exception as e:
+            # Don't fail if notification fails
+            ws_logger.warning(f"Could not send notification to user {member_request.user_id}: {e}")
+    
+    # Schedule the notification as a background task
+    background_tasks.add_task(send_notification)
+    
+    # Return member with user information
+    return {
+        "chat_id": member.chat_id,
+        "user_id": member.user_id,
+        "username": user.username,
+        "last_seen_at": member.last_seen_at,
+        "active_chat_id": member.active_chat_id
+    }
+
+@api_router.delete(
+    "/chats/{chat_id}/members/{user_id}",
+    summary="Remove member from chat",
+    description="Remove a user from a group chat. Everyone can remove anyone.",
+    tags=["Chats"]
+)
+def remove_member(
+    chat_id: int, 
+    user_id: int, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    # Check if chat exists
+    chat = get_chat(db, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    # Only allow removing members from group chats
+    if chat.type != "group":
+        raise HTTPException(status_code=400, detail="Can only remove members from group chats")
+    
+    # Check if user exists
+    user = get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Remove member from chat
+    success = remove_member_from_chat(db, chat_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Member not found in chat")
+    
+    # Create a system message indicating the user was removed
+    try:
+        removed_user = get_user(db, user_id)
+        removed_username = removed_user.username if removed_user else f"User {user_id}"
+        
+        # Create a system message
+        system_message = create_message(
+            db=db,
+            chat_id=chat_id,
+            sender_id=None,  # System message
+            msg_type="system",
+            text=f"{removed_username} was removed from the group"
+        )
+        
+        # Broadcast the system message to all chat members
+        from connection_manager import manager
+        broadcast_data = json.dumps({
+            "type": "message.new",
+            "chat_id": chat_id,
+            "message": {
+                "id": system_message.id,
+                "chat_id": chat_id,
+                "sender_id": None,
+                "sender_username": None,
+                "type": "system",
+                "text": system_message.text,
+                "content": system_message.text,
+                "created_at": system_message.created_at.isoformat() if system_message.created_at else None,
+                "timestamp": system_message.created_at.isoformat() if system_message.created_at else None,
+                "read_by": [],
+                "read_count": 0,
+                "status": None
+            }
+        })
+        
+        # Broadcast in background
+        async def broadcast_message():
+            def get_members_for_broadcast(chat_id):
+                return get_chat_members(db, chat_id)
+            await manager.broadcast(chat_id, broadcast_data, get_members_for_broadcast)
+        
+        background_tasks.add_task(broadcast_message)
+    except Exception as e:
+        ws_logger.warning(f"Failed to create system message for member removal: {e}")
+    
+    return {"message": "Member removed successfully"}
 
 
 # -------------------------------
@@ -1053,9 +1284,11 @@ async def websocket_endpoint(
     session_id: str = Query(..., description="Session ID")
 ):
     # Validate session - reject if session doesn't exist (e.g., after server restart)
+    # Use 1001 (Going Away) for server restarts - this allows frontend to reconnect
+    # Use 1008 (Policy Violation) only for explicitly invalid sessions
     if session_id not in active_sessions:
-        ws_logger.warning(f"WebSocket connection rejected: invalid session_id={session_id}")
-        await websocket.close(code=1008, reason="Invalid session. Please log in again.")
+        ws_logger.warning(f"WebSocket connection rejected: session not found (likely server restart), session_id={session_id}")
+        await websocket.close(code=1001, reason="Session expired due to server restart. Please reconnect.")
         return
     
     session = active_sessions[session_id]
