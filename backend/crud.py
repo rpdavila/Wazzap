@@ -92,3 +92,38 @@ def create_message(
 
 def get_messages_for_chat(db: Session, chat_id: int) -> list[type[Message]]:
     return db.query(Message).filter(Message.chat_id == chat_id).all()
+
+
+# -------------------------------
+# ADMIN - USERS
+# -------------------------------
+def list_all_users(db: Session) -> list[User]:
+    """List all users in the system."""
+    return db.query(User).all()
+
+
+def update_user(db: Session, user_id: int, username: Optional[str] = None, pin_hash: Optional[str] = None) -> Optional[User]:
+    """Update user information."""
+    user = get_user(db, user_id)
+    if not user:
+        return None
+    
+    if username is not None:
+        user.username = username
+    if pin_hash is not None:
+        user.pin_hash = pin_hash
+    
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def delete_user(db: Session, user_id: int) -> bool:
+    """Delete a user from the system."""
+    user = get_user(db, user_id)
+    if not user:
+        return False
+    
+    db.delete(user)
+    db.commit()
+    return True

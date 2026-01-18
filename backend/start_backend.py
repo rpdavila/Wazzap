@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from database import get_db, engine, Base
+from database import get_db, engine, Base, SessionLocal
 from crud import (
     create_user,
     get_user_by_username,
@@ -13,13 +13,17 @@ from crud import (
     get_chat_members,
     create_message,
     get_messages_for_chat,
-    list_chats_for_user
+    list_chats_for_user,
+    list_all_users,
+    update_user,
+    delete_user
 )
 from schema import (
     UserCreate, UserOut,
     ChatBase, ChatOut,
     ChatMemberBase, ChatMemberOut,
     MessageCreate, MessageOut,
+    AdminAuth, UserUpdate
 )
 import bcrypt
 import secrets
@@ -33,7 +37,111 @@ load_dotenv()
 
 manager = ConnectionManager()
 
-app = FastAPI(title="Wazzap Backend")
+app = FastAPI(
+    title="Wazzap Backend API",
+    description="""
+    Wazzap - Real-time Chat Application Backend API
+    
+    ## Features
+    - User authentication with PIN
+    - Direct and group chats
+    - Real-time messaging via WebSocket
+    - Media upload support
+    
+    ## WebSocket API
+    
+    The WebSocket endpoint is available at `/api/ws` with the following query parameters:
+    - `token`: JWT token (obtained from `/api/auth/login`)
+    - `session_id`: Session ID (obtained from `/api/auth/login`)
+    
+    ### WebSocket Message Types
+    
+    #### Client → Server:
+    - `chat.open`: Open a chat connection
+      ```json
+      {
+        "type": "chat.open",
+        "chat_id": 1,
+        "user_id": 1
+      }
+      ```
+    
+    - `message.send`: Send a message
+      ```json
+      {
+        "type": "message.send",
+        "chat_id": 1,
+        "sender_id": 1,
+        "content": "Hello!",
+        "msg_type": "text"
+      }
+      ```
+    
+    - `message.read`: Mark message as read
+      ```json
+      {
+        "type": "message.read",
+        "chat_id": 1,
+        "message_id": 123
+      }
+      ```
+    
+    - `ping`: Keep-alive ping
+      ```json
+      {
+        "type": "ping"
+      }
+      ```
+    
+    #### Server → Client:
+    - `session.ready`: Connection established
+      ```json
+      {
+        "type": "session.ready",
+        "session_id": "session-123"
+      }
+      ```
+    
+    - `message.new`: New message received
+      ```json
+      {
+        "type": "message.new",
+        "chat_id": 1,
+        "message": {
+          "id": 123,
+          "chat_id": 1,
+          "sender_id": 1,
+          "type": "text",
+          "text": "Hello!",
+          "created_at": "2024-01-01T12:00:00"
+        }
+      }
+      ```
+    
+    - `message.status`: Message status update
+      ```json
+      {
+        "type": "message.status",
+        "chat_id": 1,
+        "message_id": 123,
+        "status": "read"
+      }
+      ```
+    
+    - `pong`: Response to ping
+      ```json
+      {
+        "type": "pong"
+      }
+      ```
+    
+    ## Admin Mode
+    
+    Admin endpoints require PIN authentication (default: 0000).
+    Use the `/api/admin/auth` endpoint to authenticate and get an admin token.
+    """,
+    version="1.0.0"
+)
 
 # Create tables on startup
 @app.on_event("startup")
@@ -202,6 +310,123 @@ def upload_media(file: UploadFile = File(...)):
 
 
 # -------------------------------
+# ADMIN
+# -------------------------------
+ADMIN_PIN = "0000"
+
+def verify_admin_pin(pin: str) -> bool:
+    """Verify admin PIN."""
+    return pin == ADMIN_PIN
+
+@api_router.post("/admin/auth")
+def admin_auth(auth_data: AdminAuth, db: Session = Depends(get_db)):
+    """Authenticate as admin using PIN."""
+    if not verify_admin_pin(auth_data.pin):
+        raise HTTPException(status_code=401, detail="Invalid admin PIN")
+    
+    # Generate admin token
+    admin_token = secrets.token_urlsafe(32)
+    return {
+        "admin_token": admin_token,
+        "message": "Admin authentication successful"
+    }
+
+@api_router.get("/admin/users", response_model=list[UserOut])
+def list_users(
+    admin_pin: str = Query(..., description="Admin PIN"),
+    db: Session = Depends(get_db)
+):
+    """List all users in the system. Requires admin PIN."""
+    if not verify_admin_pin(admin_pin):
+        raise HTTPException(status_code=401, detail="Invalid admin PIN")
+    
+    return list_all_users(db)
+
+@api_router.get("/admin/users/{user_id}", response_model=UserOut)
+def get_user_admin(
+    user_id: int,
+    admin_pin: str = Query(..., description="Admin PIN"),
+    db: Session = Depends(get_db)
+):
+    """Get user details by ID. Requires admin PIN."""
+    if not verify_admin_pin(admin_pin):
+        raise HTTPException(status_code=401, detail="Invalid admin PIN")
+    
+    user = get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+@api_router.put("/admin/users/{user_id}", response_model=UserOut)
+def update_user_admin(
+    user_id: int,
+    user_update: UserUpdate,
+    admin_pin: str = Query(..., description="Admin PIN"),
+    db: Session = Depends(get_db)
+):
+    """Update user information. Requires admin PIN."""
+    if not verify_admin_pin(admin_pin):
+        raise HTTPException(status_code=401, detail="Invalid admin PIN")
+    
+    user = get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if username already exists (if changing username)
+    if user_update.username and user_update.username != user.username:
+        existing = get_user_by_username(db, user_update.username)
+        if existing:
+            raise HTTPException(status_code=400, detail="Username already exists")
+    
+    # Hash new PIN if provided
+    pin_hash = None
+    if user_update.pin:
+        pin_hash = bcrypt.hashpw(user_update.pin.encode(), bcrypt.gensalt()).decode()
+    
+    updated_user = update_user(
+        db,
+        user_id,
+        username=user_update.username,
+        pin_hash=pin_hash
+    )
+    return updated_user
+
+@api_router.delete("/admin/users/{user_id}")
+def delete_user_admin(
+    user_id: int,
+    admin_pin: str = Query(..., description="Admin PIN"),
+    db: Session = Depends(get_db)
+):
+    """Delete a user from the system. Requires admin PIN."""
+    if not verify_admin_pin(admin_pin):
+        raise HTTPException(status_code=401, detail="Invalid admin PIN")
+    
+    success = delete_user(db, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "User deleted successfully"}
+
+@api_router.post("/admin/users", response_model=UserOut)
+def create_user_admin(
+    user: UserCreate,
+    admin_pin: str = Query(..., description="Admin PIN"),
+    db: Session = Depends(get_db)
+):
+    """Create a new user. Requires admin PIN."""
+    if not verify_admin_pin(admin_pin):
+        raise HTTPException(status_code=401, detail="Invalid admin PIN")
+    
+    existing = get_user_by_username(db, user.username)
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    pin_hash = bcrypt.hashpw(user.pin.encode(), bcrypt.gensalt()).decode()
+    new_user = create_user(db, user.username, pin_hash)
+    return new_user
+
+
+# -------------------------------
 # ROOT
 # -------------------------------
 @app.get("/")
@@ -223,20 +448,22 @@ import json
 async def websocket_endpoint(
     websocket: WebSocket,
     token: str = Query(..., description="JWT token"),
-    session_id: str = Query(..., description="Session ID"),
-    db: Session = Depends(get_db)
+    session_id: str = Query(..., description="Session ID")
 ):
     # For now, we'll accept the connection and handle chat_id/user_id from messages
     # In production, you'd validate the token and extract user_id from it
     await websocket.accept()
     
-    # Send session ready confirmation
-    await websocket.send_text(json.dumps({
-        "type": "session.ready",
-        "session_id": session_id
-    }))
+    # Create database session for this WebSocket connection
+    db = SessionLocal()
     
     try:
+        # Send session ready confirmation
+        await websocket.send_text(json.dumps({
+            "type": "session.ready",
+            "session_id": session_id
+        }))
+        
         while True:
             data = await websocket.receive_text()
             
@@ -316,31 +543,37 @@ async def websocket_endpoint(
         # Disconnect from all chats
         await manager.disconnect(websocket, None)
         print(f"WebSocket disconnected: session {session_id}")
+    finally:
+        # Close database session
+        db.close()
 
 # Legacy WebSocket endpoint for backward compatibility
 @app.websocket("/ws/{chat_id}/{user_id}")
-async def websocket_endpoint_legacy(websocket: WebSocket, chat_id: int, user_id: int, db: Session = Depends(get_db)):
-    # Offload initial validation to threads
-    chat = await run_in_threadpool(get_chat, db, chat_id)
-    members = await run_in_threadpool(get_chat_members, db, chat_id)
-    member_ids = [m.user_id for m in members]
-
-    if not chat or user_id not in member_ids:
-        await websocket.accept()
-        if not chat:
-            await websocket.send_text(json.dumps({"error": "Chat not found"}))
-        else:
-            if user_id not in member_ids:
-                await websocket.send_text(json.dumps({"error": "Not a member"}))
-                return
-
-        # Removed unnecessary close() and return
-        # await websocket.close()
-        return
-
-    await manager.connect(websocket, chat_id)
-
+async def websocket_endpoint_legacy(websocket: WebSocket, chat_id: int, user_id: int):
+    # Create database session for this WebSocket connection
+    db = SessionLocal()
+    
     try:
+        # Offload initial validation to threads
+        chat = await run_in_threadpool(get_chat, db, chat_id)
+        members = await run_in_threadpool(get_chat_members, db, chat_id)
+        member_ids = [m.user_id for m in members]
+
+        if not chat or user_id not in member_ids:
+            await websocket.accept()
+            if not chat:
+                await websocket.send_text(json.dumps({"error": "Chat not found"}))
+            else:
+                if user_id not in member_ids:
+                    await websocket.send_text(json.dumps({"error": "Not a member"}))
+                    return
+
+            # Removed unnecessary close() and return
+            # await websocket.close()
+            return
+
+        await manager.connect(websocket, chat_id)
+
         while True:
             data = await websocket.receive_text()
 
@@ -392,3 +625,6 @@ async def websocket_endpoint_legacy(websocket: WebSocket, chat_id: int, user_id:
     except WebSocketDisconnect:
         await manager.disconnect(websocket, chat_id)
         print(f"User {user_id} disconnected from chat {chat_id}")
+    finally:
+        # Close database session
+        db.close()

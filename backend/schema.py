@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional
 from datetime import datetime
 from enum import Enum
@@ -25,7 +25,15 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    pin: str = Field(min_length=4, max_length=8)
+    pin: str = Field(min_length=4, max_length=8, description="PIN must be 4-8 digits (numbers only)")
+    
+    @field_validator('pin')
+    @classmethod
+    def validate_pin_numeric(cls, v: str) -> str:
+        """Validate that PIN contains only digits."""
+        if not v.isdigit():
+            raise ValueError('PIN must contain only numbers (0-9)')
+        return v
 
 
 class UserOut(UserBase):
@@ -101,3 +109,31 @@ class MessageStatusOut(MessageStatusBase):
     user_id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------
+# ADMIN SCHEMAS
+# -----------------------
+class AdminAuth(BaseModel):
+    pin: str = Field(min_length=4, max_length=8, description="Admin PIN (default: 0000)")
+    
+    @field_validator('pin')
+    @classmethod
+    def validate_pin_numeric(cls, v: str) -> str:
+        """Validate that PIN contains only digits."""
+        if not v.isdigit():
+            raise ValueError('PIN must contain only numbers (0-9)')
+        return v
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = Field(None, min_length=3, max_length=64)
+    pin: Optional[str] = Field(None, min_length=4, max_length=8, description="New PIN to set (numbers only)")
+    
+    @field_validator('pin')
+    @classmethod
+    def validate_pin_numeric(cls, v: Optional[str]) -> Optional[str]:
+        """Validate that PIN contains only digits."""
+        if v is not None and not v.isdigit():
+            raise ValueError('PIN must contain only numbers (0-9)')
+        return v

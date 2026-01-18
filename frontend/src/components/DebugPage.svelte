@@ -14,6 +14,8 @@
   let messagesOpen = false;
   let mediaOpen = false;
   let customOpen = false;
+  let adminOpen = false;
+  let swaggerOpen = false;
   
   // Test data
   let testUsername = 'admin';
@@ -26,6 +28,18 @@
   let customEndpoint = '/api/';
   let customJsonBody = '{}';
   let jsonError = null;
+  
+  // Admin data
+  let adminPin = '0000';
+  let adminAuthenticated = false;
+  let adminUsers = [];
+  let adminLoading = false;
+  let adminError = '';
+  let editingUser = null;
+  let newUsername = '';
+  let newPin = '';
+  let editUsername = '';
+  let editPin = '';
   
   // Editable API URL
   let customApiUrl = $debugApiUrl;
@@ -189,6 +203,161 @@
     if (section === 'messages') messagesOpen = !messagesOpen;
     if (section === 'media') mediaOpen = !mediaOpen;
     if (section === 'custom') customOpen = !customOpen;
+    if (section === 'admin') adminOpen = !adminOpen;
+    if (section === 'swagger') swaggerOpen = !swaggerOpen;
+  }
+  
+  // Admin functions
+  async function adminLogin() {
+    adminLoading = true;
+    adminError = '';
+    try {
+      const response = await customApiRequest('/api/admin/auth', {
+        method: 'POST',
+        body: JSON.stringify({ pin: adminPin })
+      });
+      adminAuthenticated = true;
+      addResult('/api/admin/auth', 'POST', true, response, null, { pin: '***' });
+      await loadUsers();
+    } catch (err) {
+      adminError = err.message || 'Authentication failed';
+      addResult('/api/admin/auth', 'POST', false, null, err, { pin: '***' });
+    } finally {
+      adminLoading = false;
+    }
+  }
+  
+  async function loadUsers() {
+    if (!adminAuthenticated) return;
+    adminLoading = true;
+    adminError = '';
+    try {
+      const baseUrl = get(debugApiUrl);
+      const response = await fetch(`${baseUrl}/api/admin/users?admin_pin=${encodeURIComponent(adminPin)}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      adminUsers = await response.json();
+      addResult('/api/admin/users', 'GET', true, adminUsers, null);
+    } catch (err) {
+      adminError = err.message || 'Failed to load users';
+      addResult('/api/admin/users', 'GET', false, null, err);
+    } finally {
+      adminLoading = false;
+    }
+  }
+  
+  async function createUser() {
+    if (!newUsername.trim() || !newPin.trim()) {
+      adminError = 'Username and PIN are required';
+      return;
+    }
+    adminLoading = true;
+    adminError = '';
+    try {
+      const baseUrl = get(debugApiUrl);
+      const response = await fetch(`${baseUrl}/api/admin/users?admin_pin=${encodeURIComponent(adminPin)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: newUsername, pin: newPin })
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      const newUser = await response.json();
+      addResult('/api/admin/users', 'POST', true, newUser, null, { username: newUsername, pin: '***' });
+      newUsername = '';
+      newPin = '';
+      await loadUsers();
+    } catch (err) {
+      adminError = err.message || 'Failed to create user';
+      addResult('/api/admin/users', 'POST', false, null, err, { username: newUsername, pin: '***' });
+    } finally {
+      adminLoading = false;
+    }
+  }
+  
+  function startEditUser(user) {
+    editingUser = user;
+    editUsername = user.username;
+    editPin = '';
+  }
+  
+  function cancelEdit() {
+    editingUser = null;
+    editUsername = '';
+    editPin = '';
+  }
+  
+  async function updateUser() {
+    if (!editUsername.trim()) {
+      adminError = 'Username is required';
+      return;
+    }
+    adminLoading = true;
+    adminError = '';
+    try {
+      const baseUrl = get(debugApiUrl);
+      const updateData = { username: editUsername };
+      if (editPin.trim()) {
+        updateData.pin = editPin;
+      }
+      const response = await fetch(`${baseUrl}/api/admin/users/${editingUser.id}?admin_pin=${encodeURIComponent(adminPin)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData)
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      const updatedUser = await response.json();
+      addResult(`/api/admin/users/${editingUser.id}`, 'PUT', true, updatedUser, null, { ...updateData, pin: editPin ? '***' : undefined });
+      cancelEdit();
+      await loadUsers();
+    } catch (err) {
+      adminError = err.message || 'Failed to update user';
+      addResult(`/api/admin/users/${editingUser.id}`, 'PUT', false, null, err, { username: editUsername, pin: editPin ? '***' : undefined });
+    } finally {
+      adminLoading = false;
+    }
+  }
+  
+  async function deleteUser(userId) {
+    if (!confirm('Are you sure you want to delete this user?')) {
+      return;
+    }
+    adminLoading = true;
+    adminError = '';
+    try {
+      const baseUrl = get(debugApiUrl);
+      const response = await fetch(`${baseUrl}/api/admin/users/${userId}?admin_pin=${encodeURIComponent(adminPin)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      const result = await response.json();
+      addResult(`/api/admin/users/${userId}`, 'DELETE', true, result, null);
+      await loadUsers();
+    } catch (err) {
+      adminError = err.message || 'Failed to delete user';
+      addResult(`/api/admin/users/${userId}`, 'DELETE', false, null, err);
+    } finally {
+      adminLoading = false;
+    }
+  }
+  
+  function openSwaggerDocs() {
+    const baseUrl = get(debugApiUrl);
+    window.open(`${baseUrl}/docs`, '_blank');
+  }
+  
+  function openReDoc() {
+    const baseUrl = get(debugApiUrl);
+    window.open(`${baseUrl}/redoc`, '_blank');
   }
 
   function validateJson(jsonString) {
@@ -480,6 +649,132 @@
               <button on:click={testCustomRequest} disabled={loading}>
                 {loading ? 'Sending...' : 'Send Request'}
               </button>
+            </div>
+          {/if}
+        </div>
+
+        <!-- Admin Mode Section -->
+        <div class="endpoint-group admin-section">
+          <button class="endpoint-header" on:click={() => toggleSection('admin')}>
+            <span>🔐 Admin Mode</span>
+            <span class="toggle-icon">{adminOpen ? '▼' : '▶'}</span>
+          </button>
+          {#if adminOpen}
+            <div class="endpoint-content">
+              <div class="endpoint-description">
+                Manage all users in the system. Requires admin PIN (default: 0000).
+              </div>
+              {#if !adminAuthenticated}
+                <div class="input-group">
+                  <label>Admin PIN:</label>
+                  <input type="password" bind:value={adminPin} placeholder="0000" />
+                </div>
+                <button on:click={adminLogin} disabled={adminLoading}>
+                  {adminLoading ? 'Authenticating...' : 'Authenticate as Admin'}
+                </button>
+              {:else}
+                <div class="admin-authenticated">
+                  <div class="admin-status">
+                    <span class="status-badge">✓ Authenticated</span>
+                    <button class="logout-button" on:click={() => { adminAuthenticated = false; adminUsers = []; }}>Logout</button>
+                  </div>
+                  
+                  {#if adminError}
+                    <div class="error-message">{adminError}</div>
+                  {/if}
+                  
+                  <div class="admin-actions">
+                    <button on:click={loadUsers} disabled={adminLoading}>
+                      {adminLoading ? 'Loading...' : '🔄 Refresh Users'}
+                    </button>
+                  </div>
+                  
+                  <!-- Create User -->
+                  <div class="admin-create-user">
+                    <h3>Create New User</h3>
+                    <div class="input-group">
+                      <label>Username:</label>
+                      <input type="text" bind:value={newUsername} placeholder="Enter username" />
+                    </div>
+                    <div class="input-group">
+                      <label>PIN:</label>
+                      <input type="password" bind:value={newPin} placeholder="Enter PIN" />
+                    </div>
+                    <button on:click={createUser} disabled={adminLoading || !newUsername.trim() || !newPin.trim()}>
+                      Create User
+                    </button>
+                  </div>
+                  
+                  <!-- Users List -->
+                  <div class="admin-users-list">
+                    <h3>All Users ({adminUsers.length})</h3>
+                    {#if adminUsers.length === 0}
+                      <div class="empty-state">No users found</div>
+                    {:else}
+                      <div class="users-table">
+                        {#each adminUsers as user (user.id)}
+                          <div class="user-item">
+                            {#if editingUser && editingUser.id === user.id}
+                              <div class="user-edit-form">
+                                <div class="input-group">
+                                  <label>Username:</label>
+                                  <input type="text" bind:value={editUsername} />
+                                </div>
+                                <div class="input-group">
+                                  <label>New PIN (leave empty to keep current):</label>
+                                  <input type="password" bind:value={editPin} placeholder="Leave empty to keep current" />
+                                </div>
+                                <div class="edit-actions">
+                                  <button on:click={updateUser} disabled={adminLoading}>Save</button>
+                                  <button class="cancel-button" on:click={cancelEdit} disabled={adminLoading}>Cancel</button>
+                                </div>
+                              </div>
+                            {:else}
+                              <div class="user-info">
+                                <div class="user-details">
+                                  <strong>ID:</strong> {user.id} | 
+                                  <strong>Username:</strong> {user.username} | 
+                                  <strong>Created:</strong> {new Date(user.created_at).toLocaleDateString()}
+                                </div>
+                                <div class="user-actions">
+                                  <button class="edit-button" on:click={() => startEditUser(user)} disabled={adminLoading}>Edit</button>
+                                  <button class="delete-button" on:click={() => deleteUser(user.id)} disabled={adminLoading}>Delete</button>
+                                </div>
+                              </div>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+
+        <!-- Swagger Documentation Section -->
+        <div class="endpoint-group swagger-section">
+          <button class="endpoint-header" on:click={() => toggleSection('swagger')}>
+            <span>📚 API Documentation</span>
+            <span class="toggle-icon">{swaggerOpen ? '▼' : '▶'}</span>
+          </button>
+          {#if swaggerOpen}
+            <div class="endpoint-content">
+              <div class="endpoint-description">
+                Access full Swagger/OpenAPI documentation for all REST endpoints and WebSocket implementation.
+              </div>
+              <div class="swagger-buttons">
+                <button class="swagger-button" on:click={openSwaggerDocs}>
+                  📖 Open Swagger UI
+                </button>
+                <button class="redoc-button" on:click={openReDoc}>
+                  📘 Open ReDoc
+                </button>
+              </div>
+              <div class="endpoint-note">
+                <strong>Note:</strong> Documentation includes all REST endpoints. WebSocket documentation is available in the API description.
+              </div>
             </div>
           {/if}
         </div>
@@ -1055,5 +1350,221 @@
   .result-error strong {
     display: block;
     margin-bottom: 0.25rem;
+  }
+
+  /* Admin Section Styles */
+  .admin-section {
+    border: 2px solid #9c27b0;
+    background: linear-gradient(to bottom, #f3e5f5 0%, white 100%);
+  }
+
+  .admin-authenticated {
+    margin-top: 1rem;
+  }
+
+  .admin-status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background-color: #e8f5e9;
+    border-radius: 4px;
+  }
+
+  .status-badge {
+    color: #2e7d32;
+    font-weight: 600;
+    font-size: 0.875rem;
+  }
+
+  .logout-button {
+    padding: 0.5rem 1rem;
+    background-color: #f44336;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+
+  .logout-button:hover {
+    background-color: #d32f2f;
+  }
+
+  .admin-actions {
+    margin: 1rem 0;
+  }
+
+  .admin-create-user {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    border: 1px solid #e0e0e0;
+  }
+
+  .admin-create-user h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    color: #333;
+  }
+
+  .admin-users-list {
+    margin-top: 1.5rem;
+  }
+
+  .admin-users-list h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1rem;
+    color: #333;
+  }
+
+  .users-table {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .user-item {
+    padding: 1rem;
+    background-color: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+  }
+
+  .user-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .user-details {
+    flex: 1;
+    font-size: 0.875rem;
+    color: #555;
+  }
+
+  .user-details strong {
+    color: #333;
+  }
+
+  .user-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .edit-button, .delete-button {
+    padding: 0.4rem 0.8rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+  }
+
+  .edit-button {
+    background-color: #2196f3;
+    color: white;
+  }
+
+  .edit-button:hover:not(:disabled) {
+    background-color: #1976d2;
+  }
+
+  .delete-button {
+    background-color: #f44336;
+    color: white;
+  }
+
+  .delete-button:hover:not(:disabled) {
+    background-color: #d32f2f;
+  }
+
+  .user-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .edit-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .edit-actions button {
+    flex: 1;
+    padding: 0.5rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+
+  .edit-actions button:first-child {
+    background-color: #4caf50;
+    color: white;
+  }
+
+  .edit-actions button:first-child:hover:not(:disabled) {
+    background-color: #45a049;
+  }
+
+  .cancel-button {
+    background-color: #9e9e9e;
+    color: white;
+  }
+
+  .cancel-button:hover:not(:disabled) {
+    background-color: #757575;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 2rem;
+    color: #999;
+    font-size: 0.875rem;
+  }
+
+  /* Swagger Section Styles */
+  .swagger-section {
+    border: 2px solid #4a90e2;
+    background: linear-gradient(to bottom, #e3f2fd 0%, white 100%);
+  }
+
+  .swagger-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .swagger-button, .redoc-button {
+    width: 100%;
+    padding: 0.75rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .swagger-button {
+    background-color: #4a90e2;
+    color: white;
+  }
+
+  .swagger-button:hover {
+    background-color: #357abd;
+  }
+
+  .redoc-button {
+    background-color: #2196f3;
+    color: white;
+  }
+
+  .redoc-button:hover {
+    background-color: #1976d2;
   }
 </style>
