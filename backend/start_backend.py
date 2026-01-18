@@ -44,6 +44,8 @@ app = FastAPI(
     
     ## Features
     - User authentication with PIN
+    - User registration and management
+    - Browse all users to start new chats
     - Direct and group chats
     - Real-time messaging via WebSocket
     - Media upload support
@@ -175,7 +177,22 @@ class DMCreate(BaseModel):
 # -------------------------------
 # AUTH
 # -------------------------------
-@api_router.post("/auth/register", response_model=UserOut)
+@api_router.post(
+    "/auth/register",
+    response_model=UserOut,
+    summary="Register new user",
+    description="""
+    Register a new user account.
+    
+    **Request Body:**
+    - `username`: Username (3-64 characters)
+    - `pin`: PIN (4-8 digits, numbers only)
+    
+    **Response:**
+    - Returns the newly created user object
+    """,
+    tags=["Authentication"]
+)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     existing = get_user_by_username(db, user.username)
     if existing:
@@ -185,7 +202,24 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     new_user = create_user(db, user.username, pin_hash)
     return new_user
 
-@api_router.post("/auth/login")
+@api_router.post(
+    "/auth/login",
+    summary="Login user",
+    description="""
+    Authenticate a user with username and PIN.
+    
+    **Request Body:**
+    - `username`: Username
+    - `pin`: PIN (4-8 digits)
+    
+    **Response:**
+    - `jwt`: JWT token for authentication
+    - `session_id`: Session ID for WebSocket connection
+    - `username`: Username
+    - `user_id`: User ID
+    """,
+    tags=["Authentication"]
+)
 def login(user: UserCreate, db: Session = Depends(get_db)):
     db_user = get_user_by_username(db, user.username)
     if not db_user:
@@ -205,7 +239,12 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
         "user_id": db_user.id
     }
 
-@api_router.post("/auth/logout")
+@api_router.post(
+    "/auth/logout",
+    summary="Logout user",
+    description="Logout the current user session.",
+    tags=["Authentication"]
+)
 def logout():
     return {"message": "Logout successful"}
 
@@ -213,18 +252,72 @@ def logout():
 # -------------------------------
 # CURRENT USER
 # -------------------------------
-@api_router.get("/me", response_model=UserOut)
+@api_router.get(
+    "/me",
+    response_model=UserOut,
+    summary="Get current user",
+    description="""
+    Get the current user's information.
+    
+    Requires `user_id` as a query parameter.
+    
+    **Response:**
+    - Returns `UserOut` object with user details
+    """,
+    tags=["Users"]
+)
 def get_me(user_id: int, db: Session = Depends(get_db)):
     user = get_user(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
+@api_router.get(
+    "/users",
+    response_model=list[UserOut],
+    summary="Get all users",
+    description="""
+    Get a list of all users in the system.
+    
+    This endpoint is used by regular users to see who they can start a chat with.
+    Returns a list of all registered users (excluding sensitive information like PIN hashes).
+    
+    **Use cases:**
+    - Display available users in the dashboard
+    - Allow users to search and find other users to chat with
+    - Start new direct message conversations
+    
+    **Response:**
+    - Returns a list of `UserOut` objects containing:
+      - `id`: User ID
+      - `username`: Username
+      - `created_at`: Account creation timestamp
+    """,
+    tags=["Users"]
+)
+def get_all_users(db: Session = Depends(get_db)):
+    """Get all users in the system (for regular users to see who they can chat with)."""
+    return list_all_users(db)
+
 
 # -------------------------------
 # CHATS
 # -------------------------------
-@api_router.get("/chats", response_model=list[ChatOut])
+@api_router.get(
+    "/chats",
+    response_model=list[ChatOut],
+    summary="Get user's chats",
+    description="""
+    Get all chats for a specific user.
+    
+    **Query Parameters:**
+    - `user_id`: User ID (optional)
+    - `username`: Username (alternative to user_id, optional)
+    
+    At least one of `user_id` or `username` must be provided.
+    """,
+    tags=["Chats"]
+)
 def get_chats(
     user_id: int = Query(None, description="User ID"),
     username: str = Query(None, description="Username (alternative to user_id)"),
@@ -243,11 +336,32 @@ def get_chats(
     
     return list_chats_for_user(db, user_id)
 
-@api_router.get("/chats/me", response_model=list[ChatOut])
+@api_router.get(
+    "/chats/me",
+    response_model=list[ChatOut],
+    summary="Get my chats",
+    description="Get all chats for the current user (requires user_id query parameter).",
+    tags=["Chats"]
+)
 def get_my_chats(user_id: int, db: Session = Depends(get_db)):
     return list_chats_for_user(db, user_id)
 
-@api_router.post("/chats/dm", response_model=ChatOut)
+@api_router.post(
+    "/chats/dm",
+    response_model=ChatOut,
+    summary="Create direct message",
+    description="""
+    Create a new direct message chat between two users.
+    
+    **Request Body:**
+    - `user1_id`: ID of the first user
+    - `user2_id`: ID of the second user
+    
+    **Response:**
+    - Returns the newly created chat object
+    """,
+    tags=["Chats"]
+)
 def create_dm(dm: DMCreate, db: Session = Depends(get_db)):
     # Check if DM exists, else create
     chat = create_chat(db, "direct", None)
@@ -255,12 +369,24 @@ def create_dm(dm: DMCreate, db: Session = Depends(get_db)):
     add_member_to_chat(db, chat.id, dm.user2_id)
     return chat
 
-@api_router.post("/chats/group", response_model=ChatOut)
+@api_router.post(
+    "/chats/group",
+    response_model=ChatOut,
+    summary="Create group chat",
+    description="Create a new group chat with a title.",
+    tags=["Chats"]
+)
 def create_group(chat: ChatBase, db: Session = Depends(get_db)):
     chat_obj = create_chat(db, chat.type.value, chat.title)
     return chat_obj
 
-@api_router.get("/chats/{chat_id}", response_model=ChatOut)
+@api_router.get(
+    "/chats/{chat_id}",
+    response_model=ChatOut,
+    summary="Get chat by ID",
+    description="Get details of a specific chat by its ID.",
+    tags=["Chats"]
+)
 def get_chat_by_id(chat_id: int, db: Session = Depends(get_db)):
     chat = get_chat(db, chat_id)  # Fixed: use get_chat instead of create_chat
     if not chat:
@@ -271,11 +397,23 @@ def get_chat_by_id(chat_id: int, db: Session = Depends(get_db)):
 # -------------------------------
 # CHAT MEMBERS (Show participants in a chat)
 # -------------------------------
-@api_router.get("/chats/{chat_id}/members", response_model=list[ChatMemberOut])
+@api_router.get(
+    "/chats/{chat_id}/members",
+    response_model=list[ChatMemberOut],
+    summary="Get chat members",
+    description="Get all members of a specific chat.",
+    tags=["Chats"]
+)
 def get_members(chat_id: int, db: Session = Depends(get_db)):
     return get_chat_members(db, chat_id)  # Fixed: use get_chat_members
 
-@api_router.post("/chats/{chat_id}/members", response_model=ChatMemberOut)
+@api_router.post(
+    "/chats/{chat_id}/members",
+    response_model=ChatMemberOut,
+    summary="Add member to chat",
+    description="Add a user as a member to a chat.",
+    tags=["Chats"]
+)
 def add_member(chat_id: int, member: ChatMemberBase, db: Session = Depends(get_db)):
     return add_member_to_chat(db, chat_id, member.user_id)
 
@@ -283,7 +421,22 @@ def add_member(chat_id: int, member: ChatMemberBase, db: Session = Depends(get_d
 # -------------------------------
 # MESSAGES
 # -------------------------------
-@api_router.post("/chats/{chat_id}/messages", response_model=MessageOut)
+@api_router.post(
+    "/chats/{chat_id}/messages",
+    response_model=MessageOut,
+    summary="Send message",
+    description="""
+    Send a message to a chat.
+    
+    **Request Body:**
+    - `chat_id`: Chat ID
+    - `sender_id`: Sender's user ID
+    - `type`: Message type ("text" or "media")
+    - `text`: Message text (for text messages)
+    - `media_url`: Media URL (for media messages)
+    """,
+    tags=["Messages"]
+)
 def send_message(msg: MessageCreate, db: Session = Depends(get_db)):
     message = create_message(
         db,
@@ -295,7 +448,13 @@ def send_message(msg: MessageCreate, db: Session = Depends(get_db)):
     )
     return message
 
-@api_router.get("/chats/{chat_id}/messages", response_model=list[MessageOut])
+@api_router.get(
+    "/chats/{chat_id}/messages",
+    response_model=list[MessageOut],
+    summary="Get chat messages",
+    description="Get all messages for a specific chat.",
+    tags=["Messages"]
+)
 def get_chat_messages(chat_id: int, db: Session = Depends(get_db)):
     return get_messages_for_chat(db, chat_id)
 
@@ -303,7 +462,22 @@ def get_chat_messages(chat_id: int, db: Session = Depends(get_db)):
 # -------------------------------
 # MEDIA UPLOAD
 # -------------------------------
-@api_router.post("/media/upload")
+@api_router.post(
+    "/media/upload",
+    summary="Upload media",
+    description="""
+    Upload a media file (image or GIF).
+    
+    **Request:**
+    - `file`: Media file to upload (multipart/form-data)
+    
+    **Response:**
+    - `filename`: Name of the uploaded file
+    
+    **Note:** Currently returns filename only. Full media storage implementation pending.
+    """,
+    tags=["Media"]
+)
 def upload_media(file: UploadFile = File(...)):
     # TODO: save to disk/cloud
     return {"filename": file.filename}
@@ -318,7 +492,12 @@ def verify_admin_pin(pin: str) -> bool:
     """Verify admin PIN."""
     return pin == ADMIN_PIN
 
-@api_router.post("/admin/auth")
+@api_router.post(
+    "/admin/auth",
+    summary="Admin authentication",
+    description="Authenticate as admin using PIN (default: 0000).",
+    tags=["Admin"]
+)
 def admin_auth(auth_data: AdminAuth, db: Session = Depends(get_db)):
     """Authenticate as admin using PIN."""
     if not verify_admin_pin(auth_data.pin):
@@ -331,7 +510,13 @@ def admin_auth(auth_data: AdminAuth, db: Session = Depends(get_db)):
         "message": "Admin authentication successful"
     }
 
-@api_router.get("/admin/users", response_model=list[UserOut])
+@api_router.get(
+    "/admin/users",
+    response_model=list[UserOut],
+    summary="List all users (Admin)",
+    description="List all users in the system. Requires admin PIN (default: 0000).",
+    tags=["Admin"]
+)
 def list_users(
     admin_pin: str = Query(..., description="Admin PIN"),
     db: Session = Depends(get_db)

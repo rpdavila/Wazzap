@@ -160,5 +160,16 @@ export const api = {
       }
       throw err;
     }
+  },
+
+  async getAllUsers() {
+    return request('/api/users');
+  },
+
+  async createDM(user1Id, user2Id) {
+    return request('/api/chats/dm', {
+      method: 'POST',
+      body: JSON.stringify({ user1_id: user1Id, user2_id: user2Id })
+    });
   }
 };

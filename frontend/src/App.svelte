@@ -11,6 +11,7 @@
   import ChatList from './components/ChatList.svelte';
   import ChatView from './components/ChatView.svelte';
   import DebugPage from './components/DebugPage.svelte';
+  import Dashboard from './components/Dashboard.svelte';
   import { currentView } from './stores/view.js';
 
   onMount(async () => {
@@ -49,6 +50,29 @@
   <DebugPage />
 {:else if !$auth.isAuthenticated}
   <Login />
+{:else if $currentView === 'dashboard'}
+  <div class="app">
+    <header class="app-header">
+      <div class="header-content">
+        <div class="user-info">
+          <span class="username">{$auth.username}</span>
+        </div>
+        <div class="header-right">
+          <div class="ws-status" class:connected={$websocket.connected}>
+            <span class="status-indicator"></span>
+            {wsStatus}
+          </div>
+          <button class="logout-button" on:click={handleLogout}>Logout</button>
+        </div>
+      </div>
+    </header>
+    
+    <div class="app-body">
+      <main class="main-content full-width">
+        <Dashboard />
+      </main>
+    </div>
+  </div>
 {:else}
   <div class="app">
     <header class="app-header">
@@ -177,5 +201,9 @@
   .main-content {
     flex: 1;
     overflow: hidden;
+  }
+
+  .main-content.full-width {
+    width: 100%;
   }
 </style>
