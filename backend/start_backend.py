@@ -850,6 +850,11 @@ async def websocket_endpoint(
                 if msg_type == "chat.open":
                     chat_id = payload.get("chat_id")
                     user_id = payload.get("user_id")
+                    # #region agent log
+                    import json as json_lib
+                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:850","message":"chat.open received","data":{"chat_id":chat_id,"user_id":user_id,"session_id":session_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                    # #endregion
                     # Validate user is member of chat
                     chat = await run_in_threadpool(get_chat, db, chat_id)
                     members = await run_in_threadpool(get_chat_members, db, chat_id)
@@ -857,10 +862,18 @@ async def websocket_endpoint(
                     
                     if not chat or user_id not in member_ids:
                         ws_logger.warning(f"Chat open failed: chat_id={chat_id}, user_id={user_id} (not found or not a member)")
+                        # #region agent log
+                        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:859","message":"chat.open validation failed","data":{"chat_id":chat_id,"user_id":user_id,"has_chat":chat is not None,"is_member":user_id in member_ids if user_id else False},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                        # #endregion
                         await websocket.send_text(json.dumps({"error": "Chat not found or not a member"}))
                         continue
                     
                     await manager.connect(websocket, chat_id)
+                    # #region agent log
+                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"start_backend.py:863","message":"chat.open succeeded, websocket registered","data":{"chat_id":chat_id,"user_id":user_id,"active_connections_count":len(manager.active_connections.get(chat_id, []))},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                    # #endregion
                     ws_logger.info(f"Chat opened: chat_id={chat_id}, user_id={user_id}")
                     
                 elif msg_type == "message.send":
@@ -902,7 +915,15 @@ async def websocket_endpoint(
                             "timestamp": message.created_at.isoformat() if hasattr(message, 'created_at') else None
                         }
                     }
+                    # #region agent log
+                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"start_backend.py:905","message":"About to broadcast message","data":{"chat_id":chat_id,"sender_id":sender_id,"active_connections_count":len(manager.active_connections.get(chat_id, [])),"has_chat_connections":chat_id in manager.active_connections},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                    # #endregion
                     await manager.broadcast(chat_id, json.dumps(broadcast_data))
+                    # #region agent log
+                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"start_backend.py:906","message":"Broadcast completed","data":{"chat_id":chat_id,"broadcast_message":broadcast_data},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                    # #endregion
                     preview = content[:30] + "..." if content and len(content) > 30 else content or "[media]"
                     ws_logger.info(f"Message sent via WS: chat_id={chat_id}, sender_id={sender_id}, preview='{preview}'")
                     

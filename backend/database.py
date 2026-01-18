@@ -12,6 +12,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if DATABASE_URL is None:
     raise ValueError("DATABASE_URL not set in .env")
 
+# Get SQL_ECHO from environment (default: False for less verbose logging)
+SQL_ECHO = os.getenv("SQL_ECHO", "false").lower() == "true"
+
 # Create engine with SQLite-specific connection args if sqlite db
 connect_args = {}
 if DATABASE_URL.startswith("sqlite"):
@@ -20,7 +23,7 @@ if DATABASE_URL.startswith("sqlite"):
 # Create engine
 engine = create_engine(
     DATABASE_URL,
-    echo=True,
+    echo=SQL_ECHO,  # Only echo SQL if explicitly enabled via SQL_ECHO=true
     future=True,
     connect_args=connect_args
 )

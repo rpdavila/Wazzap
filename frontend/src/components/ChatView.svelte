@@ -71,8 +71,9 @@
 
     const message = {
       chat_id: $activeChatId,
+      sender_id: $auth.userId,
       content: messageInput.trim(),
-      type: 'text'
+      msg_type: 'text'
     };
 
     sendWebSocketMessage('message.send', message);
@@ -94,8 +95,9 @@
       
       const message = {
         chat_id: $activeChatId,
-        content: response.media_url,
-        type: 'media'
+        sender_id: $auth.userId,
+        media_url: response.media_url,
+        msg_type: 'media'
       };
 
       sendWebSocketMessage('message.send', message);
