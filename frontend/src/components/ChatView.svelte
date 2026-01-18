@@ -25,6 +25,9 @@
 
   $: currentChat = $chats.find(c => c.id === $activeChatId);
   $: chatMessages = $messages[$activeChatId] || [];
+  // #region agent log
+  $: if ($activeChatId) { fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:27',message:'chatMessages reactive update',data:{activeChatId:$activeChatId,messagesCount:chatMessages.length,hasMessages:chatMessages.length > 0,allChatIds:Object.keys($messages)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{}); }
+  // #endregion
   $: currentUsername = $auth.username;
   $: isGroupChat = currentChat?.type === 'group';
   
@@ -35,15 +38,21 @@
 
   $: if ($activeChatId && $activeChatId !== previousChatId) {
     // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:22',message:'Active chat changed',data:{newChatId:$activeChatId,previousChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:36',message:'Active chat changed',data:{newChatId:$activeChatId,previousChatId,loadingMessages,currentMessagesCount:($messages[$activeChatId] || []).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
     // #endregion
     previousChatId = $activeChatId;
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:41',message:'Calling loadMessages',data:{chatId:$activeChatId,loadingMessages},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     loadMessages();
     // Load chat members if group chat
     if (isGroupChat) {
       loadChatMembers();
     }
     // Open the chat via WebSocket to receive messages
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:47',message:'Sending chat.open',data:{chatId:$activeChatId,userId:$auth.userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     sendWebSocketMessage('chat.open', {
       chat_id: $activeChatId,
       user_id: $auth.userId
@@ -57,12 +66,32 @@
   async function loadMessages() {
     // Capture activeChatId at the start to avoid race conditions
     const currentChatId = $activeChatId;
-    if (!currentChatId || loadingMessages) return;
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:57',message:'loadMessages entry',data:{currentChatId,loadingMessages,existingMessagesCount:($messages[currentChatId] || []).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
+    if (!currentChatId || loadingMessages) {
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:60',message:'loadMessages skipped',data:{currentChatId,loadingMessages,reason:!currentChatId ? 'noChatId' : 'alreadyLoading'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      return;
+    }
 
     loadingMessages = true;
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:65',message:'Calling api.getMessages',data:{currentChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
       const messageList = await api.getMessages(currentChatId);
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:66',message:'api.getMessages returned',data:{currentChatId,messageListLength:messageList.length,reactiveChatId:$activeChatId,chatIdChanged:currentChatId !== $activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:67',message:'Before setMessages',data:{currentChatId,messageListLength:messageList.length,existingMessagesCount:($messages[currentChatId] || []).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       messages.setMessages(currentChatId, messageList);
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:68',message:'After setMessages',data:{currentChatId,messageListLength:messageList.length,reactiveChatId:$activeChatId,storedMessagesCount:($messages[currentChatId] || []).length,chatIdChanged:currentChatId !== $activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       
       // #region agent log
       fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:44',message:'loadMessages completed',data:{currentChatId,capturedChatId:currentChatId,reactiveChatId:$activeChatId,messageListLength:messageList.length,chatIdChanged:currentChatId !== $activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
@@ -436,9 +465,6 @@
             : (isOwn ? (readCount > 0) : (message.status === 'read' || (message.read_by && message.read_by.includes($auth.userId))))}
           <div class="message" class:own={isOwnMessage(message)}>
           <div class="message-content">
-            {#if isGroupChat && !isOwnMessage(message)}
-              <div class="message-sender">{message.sender_username || 'Unknown'}</div>
-            {/if}
               {#if message.type === 'media'}
                 <div class="media-message" on:click={() => openMediaModal(message.content)}>
                   <img src={message.content} alt="Media" class="media-thumbnail" />
@@ -448,6 +474,9 @@
                 <div class="text-message">{message.content}</div>
               {/if}
               <div class="message-meta">
+                {#if isGroupChat && !isOwnMessage(message)}
+                  <span class="message-sender">{message.sender_username || 'Unknown'}</span>
+                {/if}
                 <span class="message-time">
                   {new Date(message.timestamp).toLocaleTimeString()}
                 </span>
@@ -697,72 +726,102 @@
   .messages-container {
     flex: 1;
     overflow-y: auto;
-    padding: 1rem;
+    padding: 0.6rem 0.85rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.25rem;
   }
 
   .message {
     display: flex;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
+    transition: transform 0.2s ease;
+  }
+
+  .message:hover {
+    transform: translateX(2px);
   }
 
   .message.own {
     justify-content: flex-end;
   }
 
+  .message.own:hover {
+    transform: translateX(-2px);
+  }
+
   .message-content {
     max-width: 70%;
-    padding: 0.75rem 1rem;
-    border-radius: 12px;
-    background-color: #e9ecef;
+    padding: 0.4rem 0.6rem;
+    border-radius: 10px;
+    background-color: #ffffff;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+    position: relative;
+  }
+
+  .message-content:hover {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.12);
+    border-color: #d0d0d0;
   }
 
   .message.own .message-content {
-    background-color: #4a90e2;
+    background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
     color: white;
+    border-color: #357abd;
+    box-shadow: 0 1px 3px rgba(74, 144, 226, 0.2), 0 2px 5px rgba(74, 144, 226, 0.15);
+  }
+
+  .message.own .message-content:hover {
+    box-shadow: 0 2px 5px rgba(74, 144, 226, 0.3), 0 3px 8px rgba(74, 144, 226, 0.2);
+    border-color: #2a6ba0;
   }
 
   .system-message-container {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    margin: 0.5rem 0;
-    padding: 0.5rem 0;
+    justify-content: center;
+    gap: 0.5rem;
+    margin: 0.2rem 0;
+    padding: 0.2rem 0;
   }
 
   .system-message-text {
     background-color: #e3f2fd;
     color: #1976d2;
-    padding: 0.375rem 0.75rem;
-    border-radius: 12px;
-    font-size: 0.8125rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 8px;
+    font-size: 0.75rem;
     font-style: italic;
     text-align: center;
     max-width: 80%;
   }
 
   .system-message-time {
-    font-size: 0.6875rem;
+    font-size: 0.625rem;
     color: #999;
-    margin-top: 0.25rem;
+    margin: 0;
   }
 
   .text-message {
     word-wrap: break-word;
     white-space: pre-wrap;
+    line-height: 1.35;
+    font-size: 0.875rem;
   }
 
   .message-sender {
-    font-size: 0.75rem;
+    font-size: 0.65rem;
     font-weight: 600;
-    color: #666;
-    margin-bottom: 0.25rem;
+    color: #555;
+    margin-right: 0.4rem;
+    letter-spacing: 0.01em;
   }
 
   .message.own .message-sender {
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(255, 255, 255, 0.95);
   }
 
   .media-message {
@@ -770,12 +829,21 @@
     cursor: pointer;
     border-radius: 8px;
     overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+  }
+
+  .media-message:hover {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    transform: scale(1.02);
   }
 
   .media-thumbnail {
     max-width: 300px;
     max-height: 300px;
     display: block;
+    width: 100%;
+    height: auto;
   }
 
   .media-overlay {
@@ -784,13 +852,15 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(0, 0, 0, 0.5);
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.6));
     color: white;
     display: flex;
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transition: opacity 0.2s;
+    transition: opacity 0.2s ease;
+    font-weight: 500;
+    font-size: 0.85rem;
   }
 
   .media-message:hover .media-overlay {
@@ -799,32 +869,45 @@
 
   .message-meta {
     display: flex;
-    gap: 0.5rem;
-    margin-top: 0.25rem;
-    font-size: 0.75rem;
-    opacity: 0.7;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.2rem;
+    font-size: 0.7rem;
+    opacity: 0.75;
+    transition: opacity 0.2s ease;
+  }
+
+  .message-content:hover .message-meta {
+    opacity: 0.9;
   }
 
   .message-time {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 400;
   }
 
   .read-status-icon {
     background: none;
     border: none;
     cursor: pointer;
-    padding: 0.125rem 0.25rem;
-    margin-left: 0.25rem;
+    padding: 0.15rem 0.3rem;
+    margin-left: 0.2rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: opacity 0.2s;
+    transition: all 0.2s ease;
     line-height: 1;
     vertical-align: middle;
+    border-radius: 4px;
   }
 
   .read-status-icon:hover {
-    opacity: 0.8;
+    background-color: rgba(0, 0, 0, 0.05);
+    transform: scale(1.1);
+  }
+
+  .message.own .read-status-icon:hover {
+    background-color: rgba(255, 255, 255, 0.15);
   }
 
   .read-icon {

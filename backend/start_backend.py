@@ -1395,7 +1395,7 @@ def get_chat_messages(
             "type": msg.type,
             "text": msg.text,
             "media_url": msg.media_url,
-            "content": msg.text if msg.type == "text" else msg.media_url,
+            "content": msg.media_url if msg.type == "media" else msg.text,  # System messages use text field
             "created_at": msg.created_at,
             "timestamp": msg.created_at.isoformat() if msg.created_at else None,
             "read_by": read_by,  # List of user IDs who have read this message

@@ -9,8 +9,14 @@ function createMessagesStore() {
   return {
     subscribe,
     setMessages: (chatId, messageList) => {
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'messages.js:11',message:'setMessages called',data:{chatId,messageListLength:messageList.length,existingMessagesCount:(messagesByChat[chatId] || []).length,allChatIds:Object.keys(messagesByChat)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
       messagesByChat[chatId] = messageList;
       set(messagesByChat);
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'messages.js:13',message:'setMessages completed',data:{chatId,messageListLength:messageList.length,storedMessagesCount:messagesByChat[chatId]?.length || 0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
     },
     addMessage: (chatId, message) => {
       if (!messagesByChat[chatId]) {

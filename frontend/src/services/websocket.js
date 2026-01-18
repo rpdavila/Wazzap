@@ -142,6 +142,9 @@ async function handleNewMessage(data) {
   // Automatically connect to this chat if not already connected
   // This ensures we receive future messages for this chat
   if (socket && socket.readyState === WebSocket.OPEN) {
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:145',message:'Auto-sending chat.open from handleNewMessage',data:{chat_id,userId:authStore.userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
     sendWebSocketMessage('chat.open', {
       chat_id: chat_id,
       user_id: authStore.userId
@@ -421,6 +424,11 @@ export function disconnectWebSocket() {
 }
 
 export function sendWebSocketMessage(type, data) {
+  // #region agent log
+  if (type === 'chat.open') {
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:423',message:'sendWebSocketMessage chat.open',data:{type,chatId:data?.chat_id,userId:data?.user_id,socketReady:socket?.readyState === WebSocket.OPEN},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  }
+  // #endregion
   const ws = get(websocket);
   if (ws.socket && ws.socket.readyState === WebSocket.OPEN) {
     ws.socket.send(JSON.stringify({ type, ...data }));
