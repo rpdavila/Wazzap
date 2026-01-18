@@ -107,4 +107,6 @@ logs/
 *.tmp
 *.temp
 .cache/
-*.cursor/
+.cursor
+frontend/.cursor
+backend/.cursor
