@@ -291,7 +291,7 @@
           </button>
         {:else}
           <button type="button" class="link-button register-link" on:click={toggleMode}>
-            <span>Register - quick in 15s!</span>
+            <span>Register - quick in 10s!</span>
           </button>
         {/if}
       </div>
