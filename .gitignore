@@ -1,5 +1,9 @@
 .idea/
 node_modules
-
+# vscode
+.vscode/
+# __pycache__
+.__pycache__/
 # backend env
 backend/.env
+frontend/.cursor
