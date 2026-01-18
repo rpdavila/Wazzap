@@ -30,12 +30,81 @@ import secrets
 import os
 import threading
 import sys
+import logging
 from dotenv import load_dotenv
 
 from connection_manager import ConnectionManager
 from starlette.concurrency import run_in_threadpool
 
 load_dotenv()
+
+# ==================== LOGGING CONFIGURATION ====================
+# Custom formatter for categorized logging
+class CategoryFormatter(logging.Formatter):
+    def format(self, record):
+        # Extract category from extra dict, default to 'GENERAL'
+        category = getattr(record, 'category', 'GENERAL')
+        # Format the message with category prefix
+        record.msg = f"[{category:10s}] {record.msg}"
+        return super().format(record)
+
+# Configure root logger
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+# Remove existing handlers
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+
+# Create console handler with custom formatter
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(CategoryFormatter(
+    fmt='%(asctime)s | %(levelname)-8s | %(message)s',
+    datefmt='%H:%M:%S'
+))
+root_logger.addHandler(console_handler)
+
+# Helper function to create category loggers
+def create_category_logger(name, category):
+    """Create a logger that automatically adds category to log records."""
+    logger = logging.getLogger(name)
+    
+    class CategoryLogger:
+        def __init__(self, logger, category):
+            self.logger = logger
+            self.category = category
+        
+        def _log(self, level, msg, *args, **kwargs):
+            kwargs.setdefault('extra', {})['category'] = self.category
+            getattr(self.logger, level)(msg, *args, **kwargs)
+        
+        def info(self, msg, *args, **kwargs):
+            self._log('info', msg, *args, **kwargs)
+        
+        def warning(self, msg, *args, **kwargs):
+            self._log('warning', msg, *args, **kwargs)
+        
+        def error(self, msg, *args, **kwargs):
+            self._log('error', msg, *args, **kwargs)
+        
+        def debug(self, msg, *args, **kwargs):
+            self._log('debug', msg, *args, **kwargs)
+    
+    return CategoryLogger(logger, category)
+
+# Create category-specific loggers
+api_logger = create_category_logger('api', 'API')
+ws_logger = create_category_logger('websocket', 'WEBSOCKET')
+db_logger = create_category_logger('database', 'DATABASE')
+auth_logger = create_category_logger('auth', 'AUTH')
+
+# Suppress verbose SQLAlchemy logging (only show warnings and errors)
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+
+# Suppress uvicorn access logs (we'll use our own)
+logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
 
 manager = ConnectionManager()
 
@@ -155,7 +224,7 @@ def create_tables():
     # Import all models to ensure they're registered with Base.metadata
     # This will create all tables defined in models.py if they don't exist
     Base.metadata.create_all(bind=engine)
-    print("✓ Database tables initialized (created if they didn't exist)")
+    db_logger.info("Database tables initialized")
 
 # Add CORS middleware
 app.add_middleware(
@@ -198,10 +267,12 @@ class DMCreate(BaseModel):
 def register(user: UserCreate, db: Session = Depends(get_db)):
     existing = get_user_by_username(db, user.username)
     if existing:
+        auth_logger.warning(f"Registration failed: username '{user.username}' already exists")
         raise HTTPException(status_code=400, detail="Username already exists")
 
     pin_hash = bcrypt.hashpw(user.pin.encode(), bcrypt.gensalt()).decode()
     new_user = create_user(db, user.username, pin_hash)
+    auth_logger.info(f"User registered: {user.username} (ID: {new_user.id})")
     return new_user
 
 @api_router.post(
@@ -225,15 +296,18 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 def login(user: UserCreate, db: Session = Depends(get_db)):
     db_user = get_user_by_username(db, user.username)
     if not db_user:
+        auth_logger.warning(f"Login failed: user '{user.username}' not found")
         raise HTTPException(status_code=400, detail="User not found")
 
     if not bcrypt.checkpw(user.pin.encode(), db_user.pin_hash.encode()):
+        auth_logger.warning(f"Login failed: incorrect PIN for user '{user.username}'")
         raise HTTPException(status_code=400, detail="Incorrect PIN")
 
     # Generate JWT token (simplified - in production use proper JWT library)
     jwt_token = secrets.token_urlsafe(32)
     session_id = secrets.token_urlsafe(16)
     
+    auth_logger.info(f"User logged in: {user.username} (ID: {db_user.id})")
     return {
         "jwt": jwt_token,
         "session_id": session_id,
@@ -498,6 +572,7 @@ def send_message(msg: MessageCreate, db: Session = Depends(get_db)):
         text=msg.text,
         media_url=msg.media_url
     )
+    api_logger.info(f"Message sent: chat_id={msg.chat_id}, sender_id={msg.sender_id}, type={msg.type.value}")
     return message
 
 @api_router.get(
@@ -761,6 +836,7 @@ async def websocket_endpoint(
             "type": "session.ready",
             "session_id": session_id
         }))
+        ws_logger.info(f"WebSocket connected: session_id={session_id}")
         
         while True:
             data = await websocket.receive_text()
@@ -780,10 +856,12 @@ async def websocket_endpoint(
                     member_ids = [m.user_id for m in members]
                     
                     if not chat or user_id not in member_ids:
+                        ws_logger.warning(f"Chat open failed: chat_id={chat_id}, user_id={user_id} (not found or not a member)")
                         await websocket.send_text(json.dumps({"error": "Chat not found or not a member"}))
                         continue
                     
                     await manager.connect(websocket, chat_id)
+                    ws_logger.info(f"Chat opened: chat_id={chat_id}, user_id={user_id}")
                     
                 elif msg_type == "message.send":
                     chat_id = payload.get("chat_id")
@@ -825,6 +903,8 @@ async def websocket_endpoint(
                         }
                     }
                     await manager.broadcast(chat_id, json.dumps(broadcast_data))
+                    preview = content[:30] + "..." if content and len(content) > 30 else content or "[media]"
+                    ws_logger.info(f"Message sent via WS: chat_id={chat_id}, sender_id={sender_id}, preview='{preview}'")
                     
                 elif msg_type == "message.read":
                     chat_id = payload.get("chat_id")
@@ -847,7 +927,7 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         # Disconnect from all chats
         await manager.disconnect(websocket, None)
-        print(f"WebSocket disconnected: session {session_id}")
+        ws_logger.info(f"WebSocket disconnected: session_id={session_id}")
     finally:
         # Close database session
         db.close()
@@ -895,7 +975,7 @@ async def websocket_endpoint_legacy(websocket: WebSocket, chat_id: int, user_id:
             # Allow client to quit
             if msg_type == "control" and content == "quit":
                 await manager.disconnect(websocket, chat_id)
-                print(f"User {user_id} disconnected from chat {chat_id}")
+                ws_logger.info(f"User {user_id} disconnected from chat {chat_id}")
                 break
 
             # New check: User still member?
@@ -926,10 +1006,12 @@ async def websocket_endpoint_legacy(websocket: WebSocket, chat_id: int, user_id:
                 "message_id": message.id
             }
             await manager.broadcast(chat_id, json.dumps(broadcast_data))
+            preview = content[:30] + "..." if content and len(content) > 30 else content or "[media]"
+            ws_logger.info(f"Message sent (legacy WS): chat_id={chat_id}, user_id={user_id}, preview='{preview}'")
 
     except WebSocketDisconnect:
         await manager.disconnect(websocket, chat_id)
-        print(f"User {user_id} disconnected from chat {chat_id}")
+        ws_logger.info(f"User {user_id} disconnected from chat {chat_id}")
     finally:
         # Close database session
         db.close()
