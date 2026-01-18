@@ -28,6 +28,8 @@ from schema import (
 import bcrypt
 import secrets
 import os
+import threading
+import sys
 from dotenv import load_dotenv
 
 from connection_manager import ConnectionManager
@@ -678,6 +680,48 @@ def create_user_admin(
     pin_hash = bcrypt.hashpw(user.pin.encode(), bcrypt.gensalt()).decode()
     new_user = create_user(db, user.username, pin_hash)
     return new_user
+
+@api_router.post(
+    "/admin/reset-database",
+    summary="Reset database (Admin)",
+    description="Drop all tables and recreate them. This will delete all data. Requires admin PIN. Server will restart after reset.",
+    tags=["Admin"]
+)
+def reset_database(
+    admin_pin: str = Query(..., description="Admin PIN"),
+    db: Session = Depends(get_db)
+):
+    """Drop all tables and recreate them. Requires admin PIN. Server will restart."""
+    if not verify_admin_pin(admin_pin):
+        raise HTTPException(status_code=401, detail="Invalid admin PIN")
+    
+    try:
+        # Close the current database session
+        db.close()
+        
+        # Dispose of all engine connections to ensure clean state
+        engine.dispose()
+        
+        # Drop all tables
+        Base.metadata.drop_all(bind=engine)
+        
+        # Recreate all tables
+        Base.metadata.create_all(bind=engine)
+        
+        # Schedule server restart after a short delay to allow response to be sent
+        def restart_server():
+            import time
+            time.sleep(1)  # Give time for response to be sent
+            os._exit(0)  # Exit the process, start.py will restart it
+        
+        threading.Thread(target=restart_server, daemon=True).start()
+        
+        return {
+            "message": "Database reset successfully. Server will restart shortly.",
+            "status": "success"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resetting database: {str(e)}")
 
 
 # -------------------------------

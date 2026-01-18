@@ -48,24 +48,24 @@ def main():
     # Setup backend
     venv_python = setup_backend(backend_dir)
     
-    # Start backend
-    print("Starting backend server...")
-    backend = subprocess.Popen([str(venv_python), "-m", "uvicorn", "start_backend:app", 
-                                "--reload", "--host", "0.0.0.0", "--port", "8000"],
-                               cwd=backend_dir, shell=is_windows)
-    time.sleep(2)
-    
-    # Start frontend
+    # Start frontend (only start once)
     print("Starting frontend server...")
     frontend = subprocess.Popen([sys.executable, "start_client.py"],
                                 cwd=frontend_dir, shell=is_windows)
     
+    # Flag to track if we should keep restarting backend
+    should_restart_backend = True
+    backend = None
+    
     # Cleanup handler
     def cleanup(sig=None, frame=None):
+        nonlocal should_restart_backend
         print("\nShutting down servers...")
-        backend.terminate()
+        should_restart_backend = False
+        if backend:
+            backend.terminate()
+            backend.wait()
         frontend.terminate()
-        backend.wait()
         frontend.wait()
         sys.exit(0)
     
@@ -73,11 +73,32 @@ def main():
     if not is_windows:
         signal.signal(signal.SIGTERM, cleanup)
     
-    try:
-        backend.wait()
-        frontend.wait()
-    except KeyboardInterrupt:
-        cleanup()
+    # Keep restarting backend if it exits (e.g., after database reset)
+    while should_restart_backend:
+        if backend is None or backend.poll() is not None:
+            if backend is not None:
+                exit_code = backend.poll()
+                if exit_code == 0:
+                    print("Backend exited. Restarting...")
+                else:
+                    print(f"Backend exited with code {exit_code}. Restarting...")
+            
+            print("Starting backend server...")
+            backend = subprocess.Popen([str(venv_python), "-m", "uvicorn", "start_backend:app", 
+                                        "--reload", "--host", "0.0.0.0", "--port", "8000"],
+                                       cwd=backend_dir, shell=is_windows)
+            time.sleep(2)
+        
+        try:
+            # Check backend status periodically
+            time.sleep(1)
+            if frontend.poll() is not None:
+                print("Frontend exited. Shutting down...")
+                cleanup()
+                break
+        except KeyboardInterrupt:
+            cleanup()
+            break
 
 if __name__ == "__main__":
     main()
