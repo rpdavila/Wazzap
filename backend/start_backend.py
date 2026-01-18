@@ -839,7 +839,16 @@ async def websocket_endpoint(
         ws_logger.info(f"WebSocket connected: session_id={session_id}")
         
         while True:
-            data = await websocket.receive_text()
+            try:
+                data = await websocket.receive_text()
+            except Exception as e:
+                # #region agent log
+                import json as json_lib
+                with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                    f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"start_backend.py:842","message":"Error receiving websocket message","data":{"session_id":session_id,"error":str(e),"error_type":type(e).__name__},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                # #endregion
+                ws_logger.error(f"Error receiving WebSocket message: {e}")
+                break
             
             # Parse incoming JSON
             try:
@@ -850,11 +859,6 @@ async def websocket_endpoint(
                 if msg_type == "chat.open":
                     chat_id = payload.get("chat_id")
                     user_id = payload.get("user_id")
-                    # #region agent log
-                    import json as json_lib
-                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:850","message":"chat.open received","data":{"chat_id":chat_id,"user_id":user_id,"session_id":session_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-                    # #endregion
                     # Validate user is member of chat
                     chat = await run_in_threadpool(get_chat, db, chat_id)
                     members = await run_in_threadpool(get_chat_members, db, chat_id)
@@ -862,18 +866,10 @@ async def websocket_endpoint(
                     
                     if not chat or user_id not in member_ids:
                         ws_logger.warning(f"Chat open failed: chat_id={chat_id}, user_id={user_id} (not found or not a member)")
-                        # #region agent log
-                        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:859","message":"chat.open validation failed","data":{"chat_id":chat_id,"user_id":user_id,"has_chat":chat is not None,"is_member":user_id in member_ids if user_id else False},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-                        # #endregion
                         await websocket.send_text(json.dumps({"error": "Chat not found or not a member"}))
                         continue
                     
                     await manager.connect(websocket, chat_id)
-                    # #region agent log
-                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"start_backend.py:863","message":"chat.open succeeded, websocket registered","data":{"chat_id":chat_id,"user_id":user_id,"active_connections_count":len(manager.active_connections.get(chat_id, []))},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-                    # #endregion
                     ws_logger.info(f"Chat opened: chat_id={chat_id}, user_id={user_id}")
                     
                 elif msg_type == "message.send":
@@ -883,49 +879,53 @@ async def websocket_endpoint(
                     media_url = payload.get("media_url")
                     msg_type_content = payload.get("msg_type", "text")
                     
-                    # Create message in database
-                    message = await run_in_threadpool(
-                        create_message,
-                        db,
-                        chat_id=chat_id,
-                        sender_id=sender_id,
-                        msg_type=msg_type_content,
-                        text=content if msg_type_content == "text" else None,
-                        media_url=media_url if msg_type_content == "media" else None
-                    )
-                    
-                    # Get sender username for broadcast
-                    sender = await run_in_threadpool(get_user, db, sender_id)
-                    sender_username = sender.username if sender else None
-                    
-                    # Broadcast to chat members
-                    broadcast_data = {
-                        "type": "message.new",
-                        "chat_id": chat_id,
-                        "message": {
-                            "id": message.id,
+                    try:
+                        # Create message in database
+                        message = await run_in_threadpool(
+                            create_message,
+                            db,
+                            chat_id=chat_id,
+                            sender_id=sender_id,
+                            msg_type=msg_type_content,
+                            text=content if msg_type_content == "text" else None,
+                            media_url=media_url if msg_type_content == "media" else None
+                        )
+                        
+                        # Get sender username for broadcast
+                        sender = await run_in_threadpool(get_user, db, sender_id)
+                        sender_username = sender.username if sender else None
+                        
+                        # Broadcast to chat members
+                        broadcast_data = {
+                            "type": "message.new",
                             "chat_id": chat_id,
-                            "sender_id": sender_id,
-                            "sender_username": sender_username,
-                            "type": msg_type_content,
-                            "text": content,
-                            "media_url": media_url,
-                            "content": content if msg_type_content == "text" else media_url,
-                            "created_at": message.created_at.isoformat() if hasattr(message, 'created_at') else None,
-                            "timestamp": message.created_at.isoformat() if hasattr(message, 'created_at') else None
+                            "message": {
+                                "id": message.id,
+                                "chat_id": chat_id,
+                                "sender_id": sender_id,
+                                "sender_username": sender_username,
+                                "type": msg_type_content,
+                                "text": content,
+                                "media_url": media_url,
+                                "content": content if msg_type_content == "text" else media_url,
+                                "created_at": message.created_at.isoformat() if hasattr(message, 'created_at') else None,
+                                "timestamp": message.created_at.isoformat() if hasattr(message, 'created_at') else None
+                            }
                         }
-                    }
-                    # #region agent log
-                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"start_backend.py:905","message":"About to broadcast message","data":{"chat_id":chat_id,"sender_id":sender_id,"active_connections_count":len(manager.active_connections.get(chat_id, [])),"has_chat_connections":chat_id in manager.active_connections},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-                    # #endregion
-                    await manager.broadcast(chat_id, json.dumps(broadcast_data))
-                    # #region agent log
-                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
-                        f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"start_backend.py:906","message":"Broadcast completed","data":{"chat_id":chat_id,"broadcast_message":broadcast_data},"timestamp":int(__import__('time').time()*1000)}) + '\n')
-                    # #endregion
-                    preview = content[:30] + "..." if content and len(content) > 30 else content or "[media]"
-                    ws_logger.info(f"Message sent via WS: chat_id={chat_id}, sender_id={sender_id}, preview='{preview}'")
+                        await manager.broadcast(chat_id, json.dumps(broadcast_data))
+                        preview = content[:30] + "..." if content and len(content) > 30 else content or "[media]"
+                        ws_logger.info(f"Message sent via WS: chat_id={chat_id}, sender_id={sender_id}, preview='{preview}'")
+                    except Exception as e:
+                        # #region agent log
+                        import json as json_lib
+                        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"F","location":"start_backend.py:866","message":"Error in message.send","data":{"session_id":session_id,"chat_id":chat_id,"sender_id":sender_id,"error":str(e),"error_type":type(e).__name__},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+                        # #endregion
+                        ws_logger.error(f"Error processing message.send: {e}", exc_info=True)
+                        try:
+                            await websocket.send_text(json.dumps({"error": "Failed to send message"}))
+                        except Exception:
+                            pass
                     
                 elif msg_type == "message.read":
                     chat_id = payload.get("chat_id")
@@ -947,11 +947,41 @@ async def websocket_endpoint(
                 
     except WebSocketDisconnect:
         # Disconnect from all chats
-        await manager.disconnect(websocket, None)
+        # #region agent log
+        import json as json_lib
+        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:927","message":"WebSocketDisconnect caught","data":{"session_id":session_id},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        # #endregion
+        try:
+            await manager.disconnect(websocket, None)
+        except Exception as e:
+            # #region agent log
+            with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:930","message":"Error in disconnect with None","data":{"session_id":session_id,"error":str(e),"error_type":type(e).__name__},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            # #endregion
+            ws_logger.error(f"Error disconnecting WebSocket: {e}")
         ws_logger.info(f"WebSocket disconnected: session_id={session_id}")
+    except Exception as e:
+        # #region agent log
+        import json as json_lib
+        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+            f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"start_backend.py:937","message":"Unexpected exception in websocket endpoint","data":{"session_id":session_id,"error":str(e),"error_type":type(e).__name__},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+        # #endregion
+        ws_logger.error(f"Unexpected error in WebSocket endpoint: {e}", exc_info=True)
+        try:
+            await manager.disconnect(websocket, None)
+        except Exception:
+            pass
     finally:
         # Close database session
-        db.close()
+        try:
+            db.close()
+        except Exception as e:
+            # #region agent log
+            with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a') as f:
+                f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"start_backend.py:947","message":"Error closing database session","data":{"session_id":session_id,"error":str(e)},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            # #endregion
+            ws_logger.error(f"Error closing database session: {e}")
 
 # Legacy WebSocket endpoint for backward compatibility
 @app.websocket("/ws/{chat_id}/{user_id}")

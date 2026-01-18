@@ -3,10 +3,15 @@
   import { activeChatId } from '../stores/chats.js';
   import { sendWebSocketMessage } from '../services/websocket.js';
   import { currentView } from '../stores/view.js';
+  import { auth } from '../stores/auth.js';
+  import { get } from 'svelte/store';
 
   function selectChat(chat) {
     activeChatId.set(chat.id);
-    sendWebSocketMessage('chat.open', { chat_id: chat.id });
+    sendWebSocketMessage('chat.open', { 
+      chat_id: chat.id,
+      user_id: get(auth).userId
+    });
   }
 
   function getChatTitle(chat) {
