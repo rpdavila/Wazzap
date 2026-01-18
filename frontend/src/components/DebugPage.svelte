@@ -350,6 +350,43 @@
     }
   }
   
+  async function resetDatabase() {
+    if (!confirm('⚠️ WARNING: This will delete ALL data in the database and restart the server.\n\nAre you absolutely sure you want to proceed?')) {
+      return;
+    }
+    adminLoading = true;
+    adminError = '';
+    try {
+      const baseUrl = get(debugApiUrl);
+      const response = await fetch(`${baseUrl}/api/admin/reset-database?admin_pin=${encodeURIComponent(adminPin)}`, {
+        method: 'POST'
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      const result = await response.json();
+      addResult('/api/admin/reset-database', 'POST', true, result, null);
+      adminError = 'Database reset successful. Server is restarting...';
+      // Clear users list since database is reset
+      adminUsers = [];
+      // Wait a bit then try to reload users (after server restarts)
+      setTimeout(async () => {
+        try {
+          await loadUsers();
+        } catch (e) {
+          // Server might still be restarting
+          adminError = 'Server is restarting. Please wait a moment and refresh.';
+        }
+      }, 3000);
+    } catch (err) {
+      adminError = err.message || 'Failed to reset database';
+      addResult('/api/admin/reset-database', 'POST', false, null, err);
+    } finally {
+      adminLoading = false;
+    }
+  }
+  
   function openSwaggerDocs() {
     const baseUrl = get(debugApiUrl);
     window.open(`${baseUrl}/docs`, '_blank');
@@ -686,6 +723,14 @@
                   <div class="admin-actions">
                     <button on:click={loadUsers} disabled={adminLoading}>
                       {adminLoading ? 'Loading...' : '🔄 Refresh Users'}
+                    </button>
+                    <button 
+                      class="danger-button" 
+                      on:click={resetDatabase} 
+                      disabled={adminLoading}
+                      title="Drop all tables and recreate them. This will delete all data and restart the server."
+                    >
+                      {adminLoading ? 'Processing...' : '🗑️ Reset Database'}
                     </button>
                   </div>
                   
@@ -1394,6 +1439,9 @@
 
   .admin-actions {
     margin: 1rem 0;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
   .admin-create-user {
@@ -1480,6 +1528,26 @@
 
   .delete-button:hover:not(:disabled) {
     background-color: #d32f2f;
+  }
+
+  .danger-button {
+    background-color: #d32f2f;
+    color: white;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .danger-button:hover:not(:disabled) {
+    background-color: #b71c1c;
+  }
+
+  .danger-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .user-edit-form {
