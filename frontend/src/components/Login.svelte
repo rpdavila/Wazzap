@@ -1,6 +1,6 @@
 <script>
   import { auth } from '../stores/auth.js';
-  import { api } from '../services/api.js';
+  import { api, ApiError } from '../services/api.js';
   import { connectWebSocket } from '../services/websocket.js';
   import { chats } from '../stores/chats.js';
   import { messages } from '../stores/messages.js';
@@ -42,7 +42,12 @@
         response = await api.login(username.trim(), pin);
       }
       
-      auth.login(username.trim(), response.jwt, response.session_id);
+      // Check if response has required fields
+      if (!response || !response.jwt || !response.session_id) {
+        throw new Error('Invalid response from server. Missing authentication tokens.');
+      }
+      
+      auth.login(username.trim(), response.jwt, response.session_id, response.user_id);
       
       // Connect WebSocket
       connectWebSocket();
@@ -55,11 +60,39 @@
       activeChatId.set(null);
       
     } catch (err) {
-      if (err instanceof Error) {
-        error = err.message || 'Login failed. Please check your credentials.';
+      console.error('Login error:', err);
+      // Handle different types of errors with specific messages
+      if (err instanceof ApiError) {
+        // API error with status code
+        if (err.status === 408 || err.message.includes('timeout') || err.message.includes('timed out')) {
+          error = 'Request timed out. The server is not responding. Please check your connection and ensure the server is running.';
+        } else if (err.status === 400) {
+          // Bad request - usually authentication errors
+          error = err.message || 'Invalid username or PIN. Please check your credentials.';
+        } else if (err.status === 401) {
+          error = 'Authentication failed. Please check your credentials.';
+        } else if (err.status === 403) {
+          error = 'Access denied. Please contact support.';
+        } else if (err.status === 404) {
+          error = 'Server endpoint not found. Please check your connection settings.';
+        } else if (err.status >= 500) {
+          error = 'Server error. Please try again later or contact support.';
+        } else {
+          error = err.message || 'Login failed. Please check your credentials.';
+        }
+      } else if (err instanceof Error) {
+        // Generic error - check for network issues
+        if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('network'))) {
+          error = 'Unable to connect to the server. Please check your internet connection and ensure the server is running.';
+        } else if (err.message) {
+          error = err.message;
+        } else {
+          error = 'Login failed. Please check your credentials.';
+        }
       } else {
         error = 'Login failed. Please check your credentials.';
       }
+      console.log('Error message set to:', error);
     } finally {
       loading = false;
     }
@@ -79,6 +112,12 @@
       handleLogin();
     }
   }
+
+  function clearError() {
+    if (error) {
+      error = '';
+    }
+  }
 </script>
 
 <div class="login-container">
@@ -92,6 +131,7 @@
           type="text"
           bind:value={username}
           on:keypress={handleKeyPress}
+          on:input={clearError}
           disabled={loading}
           autocomplete="username"
         />
@@ -103,18 +143,26 @@
           type="password"
           bind:value={pin}
           on:keypress={handleKeyPress}
+          on:input={clearError}
           disabled={loading}
           autocomplete="current-password"
         />
       </div>
       {#if error}
-        <div class="error">{error}</div>
+        <div class="error" role="alert">
+          <strong>Error:</strong> {error}
+        </div>
       {/if}
       <button type="submit" disabled={loading}>
         {loading ? 'Logging in...' : 'Login'}
       </button>
       <div class="debug-link">
-        <button type="button" class="link-button" on:click={goToDebug}>Debug and Develop</button>
+        <button type="button" class="link-button" on:click={goToDebug}>
+          <svg class="debug-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M8 0C3.58 0 0 3.58 0 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zm-1-9H7v4h2V5zm0 5H7v2h2v-2z" fill="currentColor"/>
+          </svg>
+          <span>Debug and Develop</span>
+        </button>
       </div>
     </form>
   </div>
@@ -177,10 +225,29 @@
   .error {
     color: #d32f2f;
     margin-bottom: 1rem;
-    padding: 0.5rem;
+    padding: 0.75rem;
     background-color: #ffebee;
+    border: 1px solid #d32f2f;
     border-radius: 4px;
     font-size: 0.9rem;
+    display: block;
+    animation: fadeIn 0.3s ease-in;
+  }
+
+  .error strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   button {
@@ -206,22 +273,36 @@
   }
 
   .debug-link {
-    margin-top: 1rem;
+    margin-top: 0.75rem;
     text-align: center;
   }
 
   .link-button {
-    background: none;
+    background: none !important;
+    background-color: transparent !important;
     border: none;
-    color: #4a90e2;
+    color: #6b7280;
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     cursor: pointer;
     padding: 0;
     margin: 0;
+    width: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-weight: 400;
+    transition: none;
   }
 
   .link-button:hover {
-    text-decoration: underline;
+    background: none !important;
+    background-color: transparent !important;
+  }
+
+  .debug-icon {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
   }
 </style>
