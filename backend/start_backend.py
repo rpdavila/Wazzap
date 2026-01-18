@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from database import get_db
+from database import get_db, engine, Base
 from crud import (
     create_user,
     get_user_by_username,
@@ -34,6 +34,16 @@ load_dotenv()
 manager = ConnectionManager()
 
 app = FastAPI(title="Wazzap Backend")
+
+# Create tables on startup
+@app.on_event("startup")
+def create_tables():
+    """Create all database tables if they don't exist."""
+    from models import User, Chat, ChatMember, Message, MessageStatus
+    # Import all models to ensure they're registered with Base.metadata
+    # This will create all tables defined in models.py if they don't exist
+    Base.metadata.create_all(bind=engine)
+    print("✓ Database tables initialized (created if they didn't exist)")
 
 # Add CORS middleware
 app.add_middleware(
