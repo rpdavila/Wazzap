@@ -334,7 +334,32 @@ def get_chats(
         else:
             raise HTTPException(status_code=400, detail="Either user_id or username must be provided")
     
-    return list_chats_for_user(db, user_id)
+    chats = list_chats_for_user(db, user_id)
+    
+    # Enrich direct message chats with other_user_name
+    enriched_chats = []
+    for chat in chats:
+        chat_dict = {
+            "id": chat.id,
+            "type": chat.type,
+            "title": chat.title,
+            "created_at": chat.created_at,
+            "other_user_name": None
+        }
+        
+        # For direct messages, find the other user's name
+        if chat.type == "direct":
+            members = get_chat_members(db, chat.id)
+            for member in members:
+                if member.user_id != user_id:
+                    other_user = get_user(db, member.user_id)
+                    if other_user:
+                        chat_dict["other_user_name"] = other_user.username
+                    break
+        
+        enriched_chats.append(chat_dict)
+    
+    return enriched_chats
 
 @api_router.get(
     "/chats/me",
@@ -344,7 +369,32 @@ def get_chats(
     tags=["Chats"]
 )
 def get_my_chats(user_id: int, db: Session = Depends(get_db)):
-    return list_chats_for_user(db, user_id)
+    chats = list_chats_for_user(db, user_id)
+    
+    # Enrich direct message chats with other_user_name
+    enriched_chats = []
+    for chat in chats:
+        chat_dict = {
+            "id": chat.id,
+            "type": chat.type,
+            "title": chat.title,
+            "created_at": chat.created_at,
+            "other_user_name": None
+        }
+        
+        # For direct messages, find the other user's name
+        if chat.type == "direct":
+            members = get_chat_members(db, chat.id)
+            for member in members:
+                if member.user_id != user_id:
+                    other_user = get_user(db, member.user_id)
+                    if other_user:
+                        chat_dict["other_user_name"] = other_user.username
+                    break
+        
+        enriched_chats.append(chat_dict)
+    
+    return enriched_chats
 
 @api_router.post(
     "/chats/dm",
@@ -450,13 +500,32 @@ def send_message(msg: MessageCreate, db: Session = Depends(get_db)):
 
 @api_router.get(
     "/chats/{chat_id}/messages",
-    response_model=list[MessageOut],
     summary="Get chat messages",
     description="Get all messages for a specific chat.",
     tags=["Messages"]
 )
 def get_chat_messages(chat_id: int, db: Session = Depends(get_db)):
-    return get_messages_for_chat(db, chat_id)
+    messages = get_messages_for_chat(db, chat_id)
+    
+    # Enrich messages with sender_username and content field
+    enriched_messages = []
+    for msg in messages:
+        sender = get_user(db, msg.sender_id)
+        message_dict = {
+            "id": msg.id,
+            "chat_id": msg.chat_id,
+            "sender_id": msg.sender_id,
+            "sender_username": sender.username if sender else None,
+            "type": msg.type,
+            "text": msg.text,
+            "media_url": msg.media_url,
+            "content": msg.text if msg.type == "text" else msg.media_url,
+            "created_at": msg.created_at,
+            "timestamp": msg.created_at.isoformat() if msg.created_at else None
+        }
+        enriched_messages.append(message_dict)
+    
+    return enriched_messages
 
 
 # -------------------------------
@@ -690,6 +759,10 @@ async def websocket_endpoint(
                         media_url=media_url if msg_type_content == "media" else None
                     )
                     
+                    # Get sender username for broadcast
+                    sender = await run_in_threadpool(get_user, db, sender_id)
+                    sender_username = sender.username if sender else None
+                    
                     # Broadcast to chat members
                     broadcast_data = {
                         "type": "message.new",
@@ -698,10 +771,13 @@ async def websocket_endpoint(
                             "id": message.id,
                             "chat_id": chat_id,
                             "sender_id": sender_id,
+                            "sender_username": sender_username,
                             "type": msg_type_content,
                             "text": content,
                             "media_url": media_url,
-                            "created_at": message.created_at.isoformat() if hasattr(message, 'created_at') else None
+                            "content": content if msg_type_content == "text" else media_url,
+                            "created_at": message.created_at.isoformat() if hasattr(message, 'created_at') else None,
+                            "timestamp": message.created_at.isoformat() if hasattr(message, 'created_at') else None
                         }
                     }
                     await manager.broadcast(chat_id, json.dumps(broadcast_data))
