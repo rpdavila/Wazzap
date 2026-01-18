@@ -323,6 +323,9 @@ export function connectWebSocket() {
     
     socket.onerror = (error) => {
       console.error('WebSocket error:', error);
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:324',message:'WebSocket onerror',data:{readyState:socket.readyState,error:error.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       // Check if connection was rejected (e.g., 403 Forbidden)
       // This happens when the server rejects the connection before it opens
       if (socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
@@ -330,29 +333,53 @@ export function connectWebSocket() {
         // Don't mark as invalid immediately, let onclose handle it based on the close code
         console.log('WebSocket connection rejected');
         connectionRejected = true;
+        // #region agent log
+        fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:332',message:'WebSocket connection rejected flag set',data:{readyState:socket.readyState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
       }
     };
     
     socket.onclose = (event) => {
       console.log('WebSocket closed', event.code, event.reason);
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:336',message:'WebSocket onclose',data:{code:event.code,reason:event.reason,wasClean:event.wasClean},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
       websocket.set({ connected: false, socket: null });
       stopHeartbeat();
       
-      // Check if session was explicitly invalidated (not just server restart)
+      // Check if session was explicitly invalidated
       // 1008 = Policy violation (server uses this for explicitly invalid session)
       // 1001 = Going Away (server uses this for server restarts - session expired)
       // 1003 = Invalid data (can indicate 403 rejection during handshake)
+      // 1006 = Abnormal closure (can happen when connection is rejected with 403 before handshake completes)
+      // After server restart, session is gone - user must log in again
       const isSessionExplicitlyInvalid = 
         (event.code === 1008 && event.reason && (
           event.reason.includes('Invalid session') || 
           event.reason.includes('Invalid token') ||
           event.reason.includes('Please log in again')
-        ));
+        )) ||
+        (event.code === 1001 && (
+          !event.reason || // Code 1001 from backend indicates session expired
+          event.reason.includes('Session expired') ||
+          event.reason.includes('server restart') ||
+          event.reason.includes('Please reconnect')
+        )) ||
+        // If connection was rejected (403) and we get abnormal closure,
+        // it's likely a session invalidation (FastAPI may convert 403 to 1006)
+        (connectionRejected && event.code === 1006 && !event.wasClean);
       
-      // For server restarts (1001 = Going Away, 1006 = abnormal closure), try to reconnect
-      // Only logout if we get an explicit "Invalid session" or "Invalid token" message (1008)
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:350',message:'WebSocket close validation',data:{code:event.code,reason:event.reason,isSessionExplicitlyInvalid,willLogout:isSessionExplicitlyInvalid},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      
+      // If session is invalid (either 1008 with invalid token, or 1001 with session expired),
+      // logout and redirect to login - don't try to reconnect
       if (isSessionExplicitlyInvalid) {
         console.log('Session explicitly invalidated, clearing auth and redirecting to login...');
+        // #region agent log
+        fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:355',message:'WebSocket triggering logout',data:{code:event.code,reason:event.reason},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         // Store message for login page
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('session_revalidation_message', 'true');

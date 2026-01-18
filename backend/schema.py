@@ -154,3 +154,36 @@ class UserUpdate(BaseModel):
         if v is not None and not v.isdigit():
             raise ValueError('PIN must contain only numbers (0-9)')
         return v
+
+
+# -----------------------
+# RESPONSE SCHEMAS
+# -----------------------
+class LoginResponse(BaseModel):
+    jwt: str = Field(description="JWT token for authentication")
+    session_id: str = Field(description="Session ID for WebSocket connection")
+    username: str = Field(description="Username")
+    user_id: int = Field(description="User ID")
+
+
+class LogoutResponse(BaseModel):
+    message: str = Field(default="Logout successful", description="Logout confirmation message")
+
+
+class MediaUploadResponse(BaseModel):
+    media_url: str = Field(description="URL to access the uploaded media file")
+    filename: str = Field(description="Unique filename of the uploaded file")
+
+
+class AdminAuthResponse(BaseModel):
+    admin_token: str = Field(description="Admin authentication token")
+    message: str = Field(default="Admin authentication successful", description="Authentication confirmation")
+
+
+class MessageResponse(BaseModel):
+    message: str = Field(description="Response message")
+
+
+class ResetDatabaseResponse(BaseModel):
+    message: str = Field(description="Reset confirmation message")
+    status: str = Field(description="Reset status (success)")

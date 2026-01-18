@@ -16,6 +16,10 @@ function createAuthStore() {
     const storedUsername = sessionStorage.getItem('username');
     const storedUserId = sessionStorage.getItem('user_id');
     
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.js:13',message:'Auth store init from sessionStorage',data:{hasJwt:!!storedJwt,hasSessionId:!!storedSessionId,hasUsername:!!storedUsername,hasUserId:!!storedUserId,willRestoreAuth:!!(storedJwt && storedSessionId)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    
     if (storedJwt && storedSessionId) {
       set({
         isAuthenticated: true,
@@ -24,6 +28,9 @@ function createAuthStore() {
         jwt: storedJwt,
         sessionId: storedSessionId
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.js:26',message:'Auth state restored from sessionStorage',data:{username:storedUsername,userId:storedUserId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
     }
   }
 

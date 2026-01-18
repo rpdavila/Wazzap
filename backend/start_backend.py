@@ -4,8 +4,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from database import get_db, engine, Base, SessionLocal
+from database import get_db, engine, Base, SessionLocal, DATABASE_URL
 from pathlib import Path
+from models import ChatMember
 from crud import (
     create_user,
     get_user_by_username,
@@ -33,13 +34,16 @@ from schema import (
     ChatBase, ChatOut, GroupChatCreate,
     ChatMemberBase, ChatMemberOut, ChatMemberWithUser, AddMemberRequest,
     MessageCreate, MessageOut,
-    AdminAuth, UserUpdate
+    AdminAuth, UserUpdate,
+    LoginResponse, LogoutResponse, MediaUploadResponse,
+    AdminAuthResponse, MessageResponse, ResetDatabaseResponse
 )
 import bcrypt
 import secrets
 import os
 import threading
 import sys
+import json
 import logging
 from dotenv import load_dotenv
 from pathlib import Path
@@ -184,15 +188,28 @@ with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding
 app = FastAPI(
     title="Wazzap Backend API",
     description="""
-    Wazzap - Real-time Chat Application Backend API
+    # Wazzap - Real-time Chat Application Backend API
+    
+    A comprehensive REST and WebSocket API for a real-time chat application with support for direct messages, group chats, media sharing, and user management.
     
     ## Features
-    - User authentication with PIN
-    - User registration and management
-    - Browse all users to start new chats
-    - Direct and group chats
-    - Real-time messaging via WebSocket
-    - Media upload support
+    
+    - **User Authentication**: PIN-based authentication system
+    - **User Management**: Registration, profile management, and admin controls
+    - **Chat System**: Direct messages and group chats
+    - **Real-time Messaging**: WebSocket-based real-time communication
+    - **Media Support**: Image and GIF upload and sharing
+    - **Read Receipts**: Message read status tracking
+    - **Admin Panel**: Administrative endpoints for user management
+    
+    ## API Documentation
+    
+    - **Swagger UI**: Available at `/docs` - Interactive API documentation
+    - **ReDoc**: Available at `/redoc` - Alternative API documentation
+    
+    ## Authentication
+    
+    Users authenticate using a username and PIN (4-8 digits). Upon successful login, a JWT token and session ID are returned, which are required for WebSocket connections.
     
     ## WebSocket API
     
@@ -203,90 +220,167 @@ app = FastAPI(
     ### WebSocket Message Types
     
     #### Client → Server:
-    - `chat.open`: Open a chat connection
-      ```json
-      {
-        "type": "chat.open",
-        "chat_id": 1,
-        "user_id": 1
-      }
-      ```
     
-    - `message.send`: Send a message
-      ```json
-      {
-        "type": "message.send",
-        "chat_id": 1,
-        "sender_id": 1,
-        "content": "Hello!",
-        "msg_type": "text"
-      }
-      ```
+    **`chat.open`** - Open a chat connection
+    ```json
+    {
+      "type": "chat.open",
+      "chat_id": 1,
+      "user_id": 1
+    }
+    ```
     
-    - `message.read`: Mark message as read
-      ```json
-      {
-        "type": "message.read",
-        "chat_id": 1,
-        "message_id": 123
-      }
-      ```
+    **`message.send`** - Send a message
+    ```json
+    {
+      "type": "message.send",
+      "chat_id": 1,
+      "sender_id": 1,
+      "content": "Hello!",
+      "msg_type": "text",
+      "media_url": null
+    }
+    ```
     
-    - `ping`: Keep-alive ping
-      ```json
-      {
-        "type": "ping"
-      }
-      ```
+    **`message.read`** - Mark message as read
+    ```json
+    {
+      "type": "message.read",
+      "chat_id": 1,
+      "message_id": 123
+    }
+    ```
+    
+    **`ping`** - Keep-alive ping (sent every 30 seconds)
+    ```json
+    {
+      "type": "ping"
+    }
+    ```
     
     #### Server → Client:
-    - `session.ready`: Connection established
-      ```json
-      {
-        "type": "session.ready",
-        "session_id": "session-123"
-      }
-      ```
     
-    - `message.new`: New message received
-      ```json
-      {
-        "type": "message.new",
+    **`session.ready`** - Connection established
+    ```json
+    {
+      "type": "session.ready",
+      "session_id": "session-123"
+    }
+    ```
+    
+    **`message.new`** - New message received
+    ```json
+    {
+      "type": "message.new",
+      "chat_id": 1,
+      "message": {
+        "id": 123,
         "chat_id": 1,
-        "message": {
-          "id": 123,
-          "chat_id": 1,
-          "sender_id": 1,
-          "type": "text",
-          "text": "Hello!",
-          "created_at": "2024-01-01T12:00:00"
-        }
+        "sender_id": 1,
+        "sender_username": "alice",
+        "type": "text",
+        "text": "Hello!",
+        "content": "Hello!",
+        "created_at": "2024-01-01T12:00:00",
+        "timestamp": "2024-01-01T12:00:00",
+        "read_by": [],
+        "read_count": 0,
+        "status": null
       }
-      ```
+    }
+    ```
     
-    - `message.status`: Message status update
-      ```json
-      {
-        "type": "message.status",
-        "chat_id": 1,
-        "message_id": 123,
-        "status": "read"
-      }
-      ```
+    **`message.read.update`** - Message read status update
+    ```json
+    {
+      "type": "message.read.update",
+      "chat_id": 1,
+      "message_id": 123,
+      "read_by": [2, 3],
+      "read_count": 2,
+      "read_by_user_id": 2
+    }
+    ```
     
-    - `pong`: Response to ping
-      ```json
-      {
-        "type": "pong"
-      }
-      ```
+    **`message.status`** - Message status confirmation
+    ```json
+    {
+      "type": "message.status",
+      "chat_id": 1,
+      "message_id": 123,
+      "status": "read"
+    }
+    ```
+    
+    **`chat.member.added`** - Notification when added to a group chat
+    ```json
+    {
+      "type": "chat.member.added",
+      "chat_id": 1,
+      "chat_title": "My Group",
+      "chat_type": "group"
+    }
+    ```
+    
+    **`pong`** - Response to ping
+    ```json
+    {
+      "type": "pong"
+    }
+    ```
     
     ## Admin Mode
     
-    Admin endpoints require PIN authentication (default: 0000).
-    Use the `/api/admin/auth` endpoint to authenticate and get an admin token.
+    Admin endpoints require PIN authentication (default: `0000`). Use the `/api/admin/auth` endpoint to authenticate and get an admin token.
+    
+    Admin endpoints allow:
+    - Viewing all users
+    - Creating, updating, and deleting users
+    - Resetting the database (⚠️ destructive operation)
+    
+    ## Error Responses
+    
+    The API uses standard HTTP status codes:
+    - `200`: Success
+    - `400`: Bad Request (validation errors, duplicate usernames, etc.)
+    - `401`: Unauthorized (invalid credentials or admin PIN)
+    - `404`: Not Found (user, chat, or message not found)
+    - `500`: Internal Server Error
+    
+    ## Rate Limiting
+    
+    Currently, there are no rate limits implemented. Consider implementing rate limiting for production use.
     """,
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    openapi_tags=[
+        {
+            "name": "Authentication",
+            "description": "User authentication endpoints (login, register, logout)"
+        },
+        {
+            "name": "Users",
+            "description": "User information and management endpoints"
+        },
+        {
+            "name": "Chats",
+            "description": "Chat management endpoints (create, list, get chat details, manage members)"
+        },
+        {
+            "name": "Messages",
+            "description": "Message endpoints (send, retrieve messages)"
+        },
+        {
+            "name": "Media",
+            "description": "Media upload and retrieval endpoints"
+        },
+        {
+            "name": "Admin",
+            "description": "Administrative endpoints (require admin PIN authentication)"
+        }
+    ]
 )
 
 # Create tables on startup
@@ -294,9 +388,36 @@ app = FastAPI(
 def create_tables():
     """Create all database tables if they don't exist."""
     from models import User, Chat, ChatMember, Message, MessageStatus
+    from sqlalchemy import inspect, text
     # Import all models to ensure they're registered with Base.metadata
     # This will create all tables defined in models.py if they don't exist
     Base.metadata.create_all(bind=engine)
+    
+    # Migrate sender_id column to allow NULL if needed (for system messages)
+    # Check if the column exists and if it's nullable
+    try:
+        inspector = inspect(engine)
+        if 'messages' in inspector.get_table_names():
+            columns = {col['name']: col for col in inspector.get_columns('messages')}
+            if 'sender_id' in columns and not columns['sender_id']['nullable']:
+                # Column exists but is NOT NULL - need to alter it
+                db_logger.info("Migrating messages.sender_id column to allow NULL for system messages...")
+                with engine.begin() as conn:  # Use begin() for automatic transaction management
+                    # Use raw SQL to alter the column
+                    if DATABASE_URL.startswith("sqlite"):
+                        # SQLite doesn't support ALTER COLUMN directly, need to recreate table
+                        # For now, just log a warning - user should reset database
+                        db_logger.warning("SQLite detected: sender_id column needs to be nullable. Please reset the database or manually alter the schema.")
+                    else:
+                        # MySQL/MariaDB/PostgreSQL
+                        if DATABASE_URL.startswith("mysql") or DATABASE_URL.startswith("mariadb"):
+                            conn.execute(text("ALTER TABLE messages MODIFY COLUMN sender_id INT NULL"))
+                        elif DATABASE_URL.startswith("postgresql"):
+                            conn.execute(text("ALTER TABLE messages ALTER COLUMN sender_id DROP NOT NULL"))
+                    db_logger.info("Migration completed: sender_id now allows NULL")
+    except Exception as e:
+        db_logger.warning(f"Could not migrate sender_id column: {e}. System messages may fail. Consider resetting the database.")
+    
     db_logger.info("Database tables initialized")
     # Clear all sessions on startup (sessions don't survive server restart)
     active_sessions.clear()
@@ -353,19 +474,23 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
 @api_router.post(
     "/auth/login",
+    response_model=LoginResponse,
     summary="Login user",
     description="""
     Authenticate a user with username and PIN.
     
     **Request Body:**
     - `username`: Username
-    - `pin`: PIN (4-8 digits)
+    - `pin`: PIN (4-8 digits, numbers only)
     
     **Response:**
-    - `jwt`: JWT token for authentication
+    - `jwt`: JWT token for authentication (use in WebSocket connection)
     - `session_id`: Session ID for WebSocket connection
     - `username`: Username
     - `user_id`: User ID
+    
+    **Errors:**
+    - `400`: User not found or incorrect PIN
     """,
     tags=["Authentication"]
 )
@@ -391,17 +516,30 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
     }
     
     auth_logger.info(f"User logged in: {user.username} (ID: {db_user.id}), session_id={session_id}")
-    return {
-        "jwt": jwt_token,
-        "session_id": session_id,
-        "username": db_user.username,
-        "user_id": db_user.id
-    }
+    return LoginResponse(
+        jwt=jwt_token,
+        session_id=session_id,
+        username=db_user.username,
+        user_id=db_user.id
+    )
 
 @api_router.post(
     "/auth/logout",
+    response_model=LogoutResponse,
     summary="Logout user",
-    description="Logout the current user session.",
+    description="""
+    Logout the current user session and invalidate the session.
+    
+    **Query Parameters:**
+    - `session_id`: Session ID to invalidate
+    
+    **Response:**
+    - Returns confirmation message
+    
+    **Note:**
+    - Session is removed from active sessions
+    - User will need to login again to access protected resources
+    """,
     tags=["Authentication"]
 )
 def logout(session_id: str = Query(..., description="Session ID")):
@@ -410,7 +548,7 @@ def logout(session_id: str = Query(..., description="Session ID")):
         username = active_sessions[session_id].get("username", "unknown")
         del active_sessions[session_id]
         auth_logger.info(f"User logged out: {username}, session_id={session_id}")
-    return {"message": "Logout successful"}
+    return LogoutResponse(message="Logout successful")
 
 
 # -------------------------------
@@ -551,7 +689,21 @@ def get_chats(
     "/chats/me",
     response_model=list[ChatOut],
     summary="Get my chats",
-    description="Get all chats for the current user (requires user_id query parameter).",
+    description="""
+    Get all chats for the current user.
+    
+    **Query Parameters:**
+    - `user_id`: User ID (required)
+    
+    **Response:**
+    - Returns a list of `ChatOut` objects sorted by most recent message (newest first)
+    - Each chat includes:
+      - Chat ID, type, and title
+      - Other user name (for direct messages)
+      - Unread message count
+      - Last message timestamp
+      - Creation timestamp
+    """,
     tags=["Chats"]
 )
 def get_my_chats(user_id: int, db: Session = Depends(get_db)):
@@ -616,7 +768,12 @@ def get_my_chats(user_id: int, db: Session = Depends(get_db)):
     - `user2_id`: ID of the second user
     
     **Response:**
-    - Returns the newly created chat object
+    - Returns the chat object (existing if DM already exists, or newly created)
+    
+    **Behavior:**
+    - If a direct message chat already exists between these two users, returns the existing chat
+    - Otherwise, creates a new direct message chat and adds both users as members
+    - The chat type is set to "direct"
     """,
     tags=["Chats"]
 )
@@ -696,7 +853,20 @@ def create_dm(dm: DMCreate, db: Session = Depends(get_db)):
     "/chats/group",
     response_model=ChatOut,
     summary="Create group chat",
-    description="Create a new group chat with a title and initial members.",
+    description="""
+    Create a new group chat with a title and initial members.
+    
+    **Request Body:**
+    - `title`: Group chat title (1-128 characters)
+    - `member_ids`: List of user IDs to add to the group (minimum 1 member)
+    
+    **Response:**
+    - Returns the newly created `ChatOut` object
+    
+    **Note:**
+    - All specified members are automatically added to the chat
+    - The chat type is set to "group"
+    """,
     tags=["Chats"]
 )
 def create_group(group_data: GroupChatCreate, db: Session = Depends(get_db)):
@@ -713,7 +883,20 @@ def create_group(group_data: GroupChatCreate, db: Session = Depends(get_db)):
     "/chats/{chat_id}",
     response_model=ChatOut,
     summary="Get chat by ID",
-    description="Get details of a specific chat by its ID.",
+    description="""
+    Get details of a specific chat by its ID.
+    
+    **Path Parameters:**
+    - `chat_id`: ID of the chat to retrieve
+    
+    **Response:**
+    - Returns `ChatOut` object with chat details including:
+      - Chat type (direct or group)
+      - Title (for group chats)
+      - Creation timestamp
+      - Other user name (for direct messages)
+      - Unread message count
+    """,
     tags=["Chats"]
 )
 def get_chat_by_id(chat_id: int, db: Session = Depends(get_db)):
@@ -729,7 +912,22 @@ def get_chat_by_id(chat_id: int, db: Session = Depends(get_db)):
 @api_router.get(
     "/chats/{chat_id}/members",
     summary="Get chat members",
-    description="Get all members of a specific chat with user information.",
+    description="""
+    Get all members of a specific chat with their user information.
+    
+    **Path Parameters:**
+    - `chat_id`: ID of the chat
+    
+    **Response:**
+    - Returns a list of chat members with:
+      - User ID and username
+      - Last seen timestamp
+      - Active chat ID
+      - Chat membership details
+    
+    **Errors:**
+    - `404`: Chat not found
+    """,
     tags=["Chats"]
 )
 def get_members(chat_id: int, db: Session = Depends(get_db)):
@@ -743,14 +941,36 @@ def get_members(chat_id: int, db: Session = Depends(get_db)):
 
 @api_router.post(
     "/chats/{chat_id}/members",
+    response_model=ChatMemberWithUser,
     summary="Add member to chat",
-    description="Add a user as a member to a chat (group chats only).",
+    description="""
+    Add a user as a member to a group chat.
+    
+    **Path Parameters:**
+    - `chat_id`: ID of the group chat
+    
+    **Request Body:**
+    - `user_id`: ID of the user to add to the chat
+    
+    **Response:**
+    - Returns `ChatMemberWithUser` object with member and user details
+    
+    **Behavior:**
+    - Creates a system message indicating the user was added
+    - Broadcasts notification to the added user via WebSocket
+    - Triggers frontend chat list refresh for the added user
+    
+    **Errors:**
+    - `404`: Chat or user not found
+    - `400`: Can only add members to group chats
+    """,
     tags=["Chats"]
 )
 def add_member(
     chat_id: int, 
     member_request: AddMemberRequest, 
     background_tasks: BackgroundTasks,
+    performed_by_user_id: int = Query(..., description="ID of the user performing the action"),
     db: Session = Depends(get_db)
 ):
     # Check if chat exists
@@ -775,17 +995,20 @@ def add_member(
         added_user = get_user(db, member_request.user_id)
         added_username = added_user.username if added_user else f"User {member_request.user_id}"
         
+        # Get the username of the user who performed the action
+        performed_by_user = get_user(db, performed_by_user_id)
+        performed_by_username = performed_by_user.username if performed_by_user else f"User {performed_by_user_id}"
+        
         # Create a system message
         system_message = create_message(
             db=db,
             chat_id=chat_id,
             sender_id=None,  # System message
             msg_type="system",
-            text=f"{added_username} was added to the group"
+            text=f"{added_username} was added to the group by {performed_by_username}"
         )
         
         # Broadcast the system message to all chat members
-        from connection_manager import manager
         broadcast_data = json.dumps({
             "type": "message.new",
             "chat_id": chat_id,
@@ -814,13 +1037,13 @@ def add_member(
         background_tasks.add_task(broadcast_message)
     except Exception as e:
         ws_logger.warning(f"Failed to create system message for member addition: {e}")
+        # Rollback the session to clear any pending transaction state
+        db.rollback()
     
     # Notify the added user via WebSocket that they've been added to a group chat
     # This will trigger their frontend to reload the chat list
     async def send_notification():
         try:
-            from connection_manager import manager
-            
             # Get chat details for the notification
             chat_title = chat.title or f"Group Chat {chat_id}"
             
@@ -846,24 +1069,43 @@ def add_member(
     background_tasks.add_task(send_notification)
     
     # Return member with user information
-    return {
-        "chat_id": member.chat_id,
-        "user_id": member.user_id,
-        "username": user.username,
-        "last_seen_at": member.last_seen_at,
-        "active_chat_id": member.active_chat_id
-    }
+    return ChatMemberWithUser(
+        chat_id=member.chat_id,
+        user_id=member.user_id,
+        username=user.username,
+        last_seen_at=member.last_seen_at,
+        active_chat_id=member.active_chat_id
+    )
 
 @api_router.delete(
     "/chats/{chat_id}/members/{user_id}",
+    response_model=MessageResponse,
     summary="Remove member from chat",
-    description="Remove a user from a group chat. Everyone can remove anyone.",
+    description="""
+    Remove a user from a group chat.
+    
+    **Path Parameters:**
+    - `chat_id`: ID of the group chat
+    - `user_id`: ID of the user to remove
+    
+    **Response:**
+    - Returns success message
+    
+    **Behavior:**
+    - Creates a system message indicating the user was removed
+    - Broadcasts the system message to all remaining chat members
+    
+    **Errors:**
+    - `404`: Chat, user, or member not found
+    - `400`: Can only remove members from group chats
+    """,
     tags=["Chats"]
 )
 def remove_member(
     chat_id: int, 
     user_id: int, 
     background_tasks: BackgroundTasks,
+    performed_by_user_id: int = Query(..., description="ID of the user performing the action"),
     db: Session = Depends(get_db)
 ):
     # Check if chat exists
@@ -890,17 +1132,20 @@ def remove_member(
         removed_user = get_user(db, user_id)
         removed_username = removed_user.username if removed_user else f"User {user_id}"
         
+        # Get the username of the user who performed the action
+        performed_by_user = get_user(db, performed_by_user_id)
+        performed_by_username = performed_by_user.username if performed_by_user else f"User {performed_by_user_id}"
+        
         # Create a system message
         system_message = create_message(
             db=db,
             chat_id=chat_id,
             sender_id=None,  # System message
             msg_type="system",
-            text=f"{removed_username} was removed from the group"
+            text=f"{removed_username} was removed from the group by {performed_by_username}"
         )
         
         # Broadcast the system message to all chat members
-        from connection_manager import manager
         broadcast_data = json.dumps({
             "type": "message.new",
             "chat_id": chat_id,
@@ -929,8 +1174,117 @@ def remove_member(
         background_tasks.add_task(broadcast_message)
     except Exception as e:
         ws_logger.warning(f"Failed to create system message for member removal: {e}")
+        # Rollback the session to clear any pending transaction state
+        db.rollback()
     
-    return {"message": "Member removed successfully"}
+    return MessageResponse(message="Member removed successfully")
+
+
+@api_router.delete(
+    "/chats/{chat_id}/leave",
+    response_model=MessageResponse,
+    summary="Leave or delete chat",
+    description=""" 
+    Remove the current user from a chat (leave group chat or delete direct message).
+    
+    **Path Parameters:**
+    - `chat_id`: ID of the chat to leave/delete
+    
+    **Query Parameters:**
+    - `user_id`: ID of the user leaving the chat
+    
+    **Response:**
+    - Returns success message
+    
+    **Behavior:**
+    - For group chats: Removes the user from the chat and creates a system message
+    - For direct messages: Removes the user from the chat (effectively deleting it for that user)
+    - Broadcasts the system message to all remaining chat members (for group chats)
+    
+    **Errors:**
+    - `404`: Chat or user not found
+    - `400`: User is not a member of this chat
+    """,
+    tags=["Chats"]
+)
+def leave_chat(
+    chat_id: int,
+    user_id: int = Query(..., description="ID of the user leaving the chat"),
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db)
+):
+    # Check if chat exists
+    chat = get_chat(db, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    # Check if user exists
+    user = get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if user is a member of the chat
+    member = db.query(ChatMember).filter(
+        ChatMember.chat_id == chat_id,
+        ChatMember.user_id == user_id
+    ).first()
+    
+    if not member:
+        raise HTTPException(status_code=400, detail="User is not a member of this chat")
+    
+    # Remove member from chat
+    success = remove_member_from_chat(db, chat_id, user_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to remove user from chat")
+    
+    # Create a system message for group chats
+    if chat.type == "group":
+        try:
+            removed_username = user.username if user else f"User {user_id}"
+            
+            # Create a system message
+            system_message = create_message(
+                db=db,
+                chat_id=chat_id,
+                sender_id=None,  # System message
+                msg_type="system",
+                text=f"{removed_username} left the group"
+            )
+            
+            # Broadcast the system message to all chat members
+            broadcast_data = json.dumps({
+                "type": "message.new",
+                "chat_id": chat_id,
+                "message": {
+                    "id": system_message.id,
+                    "chat_id": chat_id,
+                    "sender_id": None,
+                    "sender_username": None,
+                    "type": "system",
+                    "text": system_message.text,
+                    "content": system_message.text,
+                    "created_at": system_message.created_at.isoformat() if system_message.created_at else None,
+                    "timestamp": system_message.created_at.isoformat() if system_message.created_at else None,
+                    "read_by": [],
+                    "read_count": 0,
+                    "status": None
+                }
+            })
+            
+            # Broadcast in background
+            async def broadcast_message():
+                def get_members_for_broadcast(chat_id):
+                    return get_chat_members(db, chat_id)
+                await manager.broadcast(chat_id, broadcast_data, get_members_for_broadcast)
+            
+            if background_tasks:
+                background_tasks.add_task(broadcast_message)
+        except Exception as e:
+            ws_logger.warning(f"Failed to create system message for chat leave: {e}")
+            # Rollback the session to clear any pending transaction state
+            db.rollback()
+    
+    return MessageResponse(message="Chat left successfully")
 
 
 # -------------------------------
@@ -941,14 +1295,24 @@ def remove_member(
     response_model=MessageOut,
     summary="Send message",
     description="""
-    Send a message to a chat.
+    Send a message to a chat via REST API.
+    
+    **Path Parameters:**
+    - `chat_id`: ID of the chat to send the message to
     
     **Request Body:**
-    - `chat_id`: Chat ID
+    - `chat_id`: Chat ID (must match path parameter)
     - `sender_id`: Sender's user ID
-    - `type`: Message type ("text" or "media")
-    - `text`: Message text (for text messages)
-    - `media_url`: Media URL (for media messages)
+    - `type`: Message type - `text` or `media`
+    - `text`: Message text content (required for text messages)
+    - `media_url`: Media URL (required for media messages)
+    
+    **Response:**
+    - Returns `MessageOut` object with message details
+    
+    **Note:**
+    - For real-time messaging, use WebSocket endpoint `/api/ws` with `message.send` event
+    - This REST endpoint is useful for server-side message creation or testing
     """,
     tags=["Messages"]
 )
@@ -967,7 +1331,28 @@ def send_message(msg: MessageCreate, db: Session = Depends(get_db)):
 @api_router.get(
     "/chats/{chat_id}/messages",
     summary="Get chat messages",
-    description="Get all messages for a specific chat.",
+    description="""
+    Get all messages for a specific chat with read status information.
+    
+    **Path Parameters:**
+    - `chat_id`: ID of the chat
+    
+    **Query Parameters:**
+    - `user_id`: User ID (optional) - If provided, includes read status for this user
+    
+    **Response:**
+    - Returns a list of enriched message objects with:
+      - Message content (text or media_url)
+      - Sender information
+      - Read status (if user_id provided)
+      - Read count and list of users who have read the message
+      - Timestamps
+    
+    **Message Status:**
+    - `sent`: Message sent but not read by anyone
+    - `read`: Message has been read (by at least one recipient for sent messages, or by current user for received messages)
+    - `unread`: Message not yet read by current user
+    """,
     tags=["Messages"]
 )
 def get_chat_messages(
@@ -1027,17 +1412,28 @@ def get_chat_messages(
 # -------------------------------
 @api_router.post(
     "/media/upload",
+    response_model=MediaUploadResponse,
     summary="Upload media",
     description="""
-    Upload a media file (image or GIF).
+    Upload a media file (image or GIF) for use in chat messages.
     
     **Request:**
     - `file`: Media file to upload (multipart/form-data)
+      - Supported formats: Images (JPG, PNG, GIF, etc.)
+      - File size limits may apply
     
     **Response:**
-    - `filename`: Name of the uploaded file
+    - `media_url`: Full URL to access the uploaded media file
+    - `filename`: Unique filename of the uploaded file
     
-    **Note:** Currently returns filename only. Full media storage implementation pending.
+    **Usage:**
+    1. Upload media file using this endpoint
+    2. Use the returned `media_url` in message creation (via REST or WebSocket)
+    3. Set message type to `media` when sending
+    
+    **Note:**
+    - Files are stored with unique UUID-based filenames
+    - Media files are accessible via `/api/media/{filename}` endpoint
     """,
     tags=["Media"]
 )
@@ -1097,8 +1493,22 @@ def verify_admin_pin(pin: str) -> bool:
 
 @api_router.post(
     "/admin/auth",
+    response_model=AdminAuthResponse,
     summary="Admin authentication",
-    description="Authenticate as admin using PIN (default: 0000).",
+    description="""
+    Authenticate as admin using PIN to get an admin token.
+    
+    **Request Body:**
+    - `pin`: Admin PIN (default: 0000)
+    
+    **Response:**
+    - `admin_token`: Admin authentication token
+    - `message`: Authentication confirmation message
+    
+    **Note:**
+    - Admin token can be used for admin operations
+    - Default admin PIN is `0000` (change in production!)
+    """,
     tags=["Admin"]
 )
 def admin_auth(auth_data: AdminAuth, db: Session = Depends(get_db)):
@@ -1108,10 +1518,7 @@ def admin_auth(auth_data: AdminAuth, db: Session = Depends(get_db)):
     
     # Generate admin token
     admin_token = secrets.token_urlsafe(32)
-    return {
-        "admin_token": admin_token,
-        "message": "Admin authentication successful"
-    }
+    return AdminAuthResponse(admin_token=admin_token, message="Admin authentication successful")
 
 @api_router.get(
     "/admin/users",
@@ -1130,7 +1537,28 @@ def list_users(
     
     return list_all_users(db)
 
-@api_router.get("/admin/users/{user_id}", response_model=UserOut)
+@api_router.get(
+    "/admin/users/{user_id}",
+    response_model=UserOut,
+    summary="Get user by ID (Admin)",
+    description="""
+    Get detailed information about a specific user by their ID.
+    
+    **Query Parameters:**
+    - `admin_pin`: Admin PIN (default: 0000)
+    
+    **Path Parameters:**
+    - `user_id`: ID of the user to retrieve
+    
+    **Response:**
+    - Returns `UserOut` object with user details
+    
+    **Errors:**
+    - `401`: Invalid admin PIN
+    - `404`: User not found
+    """,
+    tags=["Admin"]
+)
 def get_user_admin(
     user_id: int,
     admin_pin: str = Query(..., description="Admin PIN"),
@@ -1145,7 +1573,33 @@ def get_user_admin(
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
-@api_router.put("/admin/users/{user_id}", response_model=UserOut)
+@api_router.put(
+    "/admin/users/{user_id}",
+    response_model=UserOut,
+    summary="Update user (Admin)",
+    description="""
+    Update user information (username and/or PIN).
+    
+    **Query Parameters:**
+    - `admin_pin`: Admin PIN (default: 0000)
+    
+    **Path Parameters:**
+    - `user_id`: ID of the user to update
+    
+    **Request Body:**
+    - `username`: New username (optional, 3-64 characters)
+    - `pin`: New PIN (optional, 4-8 digits, numbers only)
+    
+    **Response:**
+    - Returns updated `UserOut` object
+    
+    **Errors:**
+    - `401`: Invalid admin PIN
+    - `404`: User not found
+    - `400`: Username already exists
+    """,
+    tags=["Admin"]
+)
 def update_user_admin(
     user_id: int,
     user_update: UserUpdate,
@@ -1179,7 +1633,28 @@ def update_user_admin(
     )
     return updated_user
 
-@api_router.delete("/admin/users/{user_id}")
+@api_router.delete(
+    "/admin/users/{user_id}",
+    response_model=MessageResponse,
+    summary="Delete user (Admin)",
+    description="""
+    Delete a user from the system. This action cannot be undone.
+    
+    **Query Parameters:**
+    - `admin_pin`: Admin PIN (default: 0000)
+    
+    **Path Parameters:**
+    - `user_id`: ID of the user to delete
+    
+    **Response:**
+    - Returns success message
+    
+    **Errors:**
+    - `401`: Invalid admin PIN
+    - `404`: User not found
+    """,
+    tags=["Admin"]
+)
 def delete_user_admin(
     user_id: int,
     admin_pin: str = Query(..., description="Admin PIN"),
@@ -1193,9 +1668,31 @@ def delete_user_admin(
     if not success:
         raise HTTPException(status_code=404, detail="User not found")
     
-    return {"message": "User deleted successfully"}
+    return MessageResponse(message="User deleted successfully")
 
-@api_router.post("/admin/users", response_model=UserOut)
+@api_router.post(
+    "/admin/users",
+    response_model=UserOut,
+    summary="Create user (Admin)",
+    description="""
+    Create a new user account via admin interface.
+    
+    **Query Parameters:**
+    - `admin_pin`: Admin PIN (default: 0000)
+    
+    **Request Body:**
+    - `username`: Username (3-64 characters)
+    - `pin`: PIN (4-8 digits, numbers only)
+    
+    **Response:**
+    - Returns the newly created `UserOut` object
+    
+    **Errors:**
+    - `401`: Invalid admin PIN
+    - `400`: Username already exists
+    """,
+    tags=["Admin"]
+)
 def create_user_admin(
     user: UserCreate,
     admin_pin: str = Query(..., description="Admin PIN"),
@@ -1215,8 +1712,32 @@ def create_user_admin(
 
 @api_router.post(
     "/admin/reset-database",
+    response_model=ResetDatabaseResponse,
     summary="Reset database (Admin)",
-    description="Drop all tables and recreate them. This will delete all data. Requires admin PIN. Server will restart after reset.",
+    description="""
+    Drop all tables and recreate them. ⚠️ **DESTRUCTIVE OPERATION** ⚠️
+    
+    This will delete ALL data in the database including:
+    - All users
+    - All chats
+    - All messages
+    - All media references
+    
+    **Query Parameters:**
+    - `admin_pin`: Admin PIN (default: 0000)
+    
+    **Response:**
+    - Returns confirmation message and status
+    
+    **Warning:**
+    - This operation cannot be undone
+    - Server will automatically restart after reset
+    - All active sessions will be invalidated
+    
+    **Errors:**
+    - `401`: Invalid admin PIN
+    - `500`: Error during database reset
+    """,
     tags=["Admin"]
 )
 def reset_database(
@@ -1248,10 +1769,10 @@ def reset_database(
         
         threading.Thread(target=restart_server, daemon=True).start()
         
-        return {
-            "message": "Database reset successfully. Server will restart shortly.",
-            "status": "success"
-        }
+        return ResetDatabaseResponse(
+            message="Database reset successfully. Server will restart shortly.",
+            status="success"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resetting database: {str(e)}")
 
@@ -1259,8 +1780,14 @@ def reset_database(
 # -------------------------------
 # ROOT
 # -------------------------------
-@app.get("/")
+@app.get(
+    "/",
+    summary="Root endpoint",
+    description="Health check endpoint. Returns API status.",
+    tags=["Root"]
+)
 def read_root():
+    """Root endpoint for health check."""
     return {"message": "Wazzap Backend Running!"}
 
 # Include API router
@@ -1277,11 +1804,14 @@ from fastapi import WebSocket, WebSocketDisconnect
 import json
 
 
-@app.websocket("/api/ws")
+@app.websocket(
+    "/api/ws",
+    name="WebSocket Chat Connection"
+)
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: str = Query(..., description="JWT token"),
-    session_id: str = Query(..., description="Session ID")
+    token: str = Query(..., description="JWT token obtained from /api/auth/login"),
+    session_id: str = Query(..., description="Session ID obtained from /api/auth/login")
 ):
     # Validate session - reject if session doesn't exist (e.g., after server restart)
     # Use 1001 (Going Away) for server restarts - this allows frontend to reconnect

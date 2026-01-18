@@ -240,8 +240,8 @@
     <h1>{isRegisterMode ? 'Quick Register' : 'Chat Login'}</h1>
     {#if sessionRevalidationMessage}
       <div class="info-message" role="alert">
-        <strong>Session Revalidation Required</strong>
-        <p>Your session has expired for security purposes. Please log in again to continue.</p>
+        <strong>Session Expired</strong>
+        <p>The server was restarted and your session has been cleared. Please log in again to continue.</p>
       </div>
     {/if}
     <form on:submit|preventDefault={isRegisterMode ? handleRegister : handleLogin}>

@@ -20,6 +20,12 @@
   let searchQuery = '';
   let groupChatTitle = '';
   let selectedMembers = new Set();
+  
+  // Chat menu state
+  let openChatMenuId = null;
+  let chatMenuRefs = {};
+  let showDeleteConfirm = false;
+  let chatToDelete = null;
 
   $: filteredUsers = users.filter(user => 
     user.id !== $auth.userId && 
@@ -39,6 +45,18 @@
           newChatButtonRef && 
           !newChatButtonRef.contains(event.target)) {
         closeDropdown();
+      }
+      
+      // Close chat menu when clicking outside
+      if (openChatMenuId !== null) {
+        const menuRef = chatMenuRefs[openChatMenuId];
+        if (menuRef && !menuRef.contains(event.target)) {
+          // Check if click was on the three dots button
+          const threeDotsButton = event.target.closest('.chat-menu-button');
+          if (!threeDotsButton) {
+            closeChatMenu();
+          }
+        }
       }
     };
     
@@ -190,6 +208,53 @@
     showDMModal = false;
     error = '';
   }
+
+  function toggleChatMenu(chatId, event) {
+    event.stopPropagation();
+    if (openChatMenuId === chatId) {
+      openChatMenuId = null;
+    } else {
+      openChatMenuId = chatId;
+    }
+  }
+
+  function closeChatMenu() {
+    openChatMenuId = null;
+  }
+
+  function openDeleteConfirm(chat, event) {
+    event.stopPropagation();
+    chatToDelete = chat;
+    showDeleteConfirm = true;
+    closeChatMenu();
+  }
+
+  function closeDeleteConfirm() {
+    showDeleteConfirm = false;
+    chatToDelete = null;
+  }
+
+  async function deleteChat() {
+    if (!chatToDelete) return;
+    
+    try {
+      await api.leaveChat(chatToDelete.id, $auth.userId);
+      
+      // Remove chat from list
+      chats.update(chatsList => chatsList.filter(c => c.id !== chatToDelete.id));
+      
+      // If this was the active chat, clear it
+      if ($activeChatId === chatToDelete.id) {
+        activeChatId.set(null);
+      }
+      
+      closeDeleteConfirm();
+    } catch (err) {
+      console.error('Failed to delete chat:', err);
+      error = err.message || 'Failed to delete chat. Please try again.';
+      closeDeleteConfirm();
+    }
+  }
 </script>
 
 <div class="chat-list">
@@ -236,9 +301,34 @@
         <div class="chat-item-content">
           <div class="chat-title">{getChatTitle(chat)}</div>
         </div>
-        {#if chat.unread_count > 0}
-          <div class="unread-badge">{chat.unread_count}</div>
-        {/if}
+        <div class="chat-item-actions">
+          {#if chat.unread_count > 0}
+            <div class="unread-badge">{chat.unread_count}</div>
+          {/if}
+          <button
+            class="chat-menu-button"
+            on:click={(e) => toggleChatMenu(chat.id, e)}
+            title="Chat options"
+            tabindex="0"
+          >
+            <span class="three-dots">⋯</span>
+          </button>
+          {#if openChatMenuId === chat.id}
+            <div 
+              class="chat-menu-dropdown"
+              bind:this={chatMenuRefs[chat.id]}
+              on:click|stopPropagation
+            >
+              <button 
+                class="chat-menu-item delete-chat"
+                on:click={(e) => openDeleteConfirm(chat, e)}
+              >
+                <span class="menu-icon">🗑️</span>
+                Delete Chat
+              </button>
+            </div>
+          {/if}
+        </div>
       </div>
     {:else}
       <div class="empty-state">No chats available</div>
@@ -292,6 +382,40 @@
             {/each}
           </div>
         {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Delete Chat Confirmation Modal -->
+{#if showDeleteConfirm && chatToDelete}
+  <div class="modal-overlay" on:click={closeDeleteConfirm}>
+    <div class="modal-content" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>Delete Chat</h3>
+        <button class="modal-close" on:click={closeDeleteConfirm}>×</button>
+      </div>
+      <div class="modal-body">
+        <p>
+          Are you sure you want to delete this chat?
+          {#if chatToDelete.type === 'group'}
+            <br><strong>You will leave the group chat.</strong>
+          {:else}
+            <br><strong>This chat will be removed from your chat list.</strong>
+          {/if}
+        </p>
+        <p class="chat-name-preview">
+          <strong>{getChatTitle(chatToDelete)}</strong>
+        </p>
+        {#if error}
+          <div class="error-message">{error}</div>
+        {/if}
+      </div>
+      <div class="modal-footer">
+        <button class="cancel-button" on:click={closeDeleteConfirm}>Cancel</button>
+        <button class="delete-button" on:click={deleteChat}>
+          Delete Chat
+        </button>
       </div>
     </div>
   </div>
@@ -518,6 +642,13 @@
     text-overflow: ellipsis;
   }
 
+  .chat-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    position: relative;
+  }
+
   .unread-badge {
     background-color: #4a90e2;
     color: white;
@@ -527,6 +658,78 @@
     font-weight: 600;
     min-width: 20px;
     text-align: center;
+  }
+
+  .chat-menu-button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    color: #666;
+    font-size: 1.25rem;
+    line-height: 1;
+    width: 28px;
+    height: 28px;
+  }
+
+  .chat-menu-button:hover {
+    background-color: #e0e0e0;
+    color: #333;
+  }
+
+  .three-dots {
+    font-weight: bold;
+    transform: rotate(90deg);
+    display: inline-block;
+  }
+
+  .chat-menu-dropdown {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    right: 0;
+    background-color: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    min-width: 160px;
+    z-index: 1001;
+    overflow: hidden;
+  }
+
+  .chat-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: #333;
+    transition: background-color 0.2s;
+  }
+
+  .chat-menu-item:hover {
+    background-color: #f5f5f5;
+  }
+
+  .chat-menu-item.delete-chat {
+    color: #d32f2f;
+  }
+
+  .chat-menu-item.delete-chat:hover {
+    background-color: #ffebee;
+  }
+
+  .menu-icon {
+    font-size: 1rem;
   }
 
   .empty-state {
@@ -799,5 +1002,29 @@
   .create-button:disabled {
     background-color: #ccc;
     cursor: not-allowed;
+  }
+
+  .chat-name-preview {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background-color: #f5f5f5;
+    border-radius: 4px;
+    text-align: center;
+  }
+
+  .delete-button {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    background-color: #d32f2f;
+    color: white;
+  }
+
+  .delete-button:hover {
+    background-color: #b71c1c;
   }
 </style>
