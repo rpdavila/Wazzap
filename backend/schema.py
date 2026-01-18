@@ -55,6 +55,7 @@ class ChatOut(ChatBase):
     id: int
     created_at: datetime
     other_user_name: Optional[str] = None
+    unread_count: Optional[int] = 0  # Number of unread messages for the current user
 
     model_config = ConfigDict(from_attributes=True)
 

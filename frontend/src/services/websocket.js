@@ -4,6 +4,7 @@ import { websocket } from '../stores/websocket.js';
 import { chats } from '../stores/chats.js';
 import { messages } from '../stores/messages.js';
 import { activeChatId } from '../stores/chats.js';
+import { api } from './api.js';
 import { get } from 'svelte/store';
 
 let socket = null;
@@ -48,6 +49,10 @@ function handleWebSocketEvent(event) {
         handleMessageStatus(data);
         break;
       
+      case 'message.read.update':
+        handleMessageReadUpdate(data);
+        break;
+      
       case 'presence.update':
         // Handle presence updates if needed
         break;
@@ -64,26 +69,125 @@ function handleWebSocketEvent(event) {
   }
 }
 
-function handleNewMessage(data) {
+// Request notification permission on load
+if (typeof window !== 'undefined' && 'Notification' in window) {
+  if (Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
+async function handleNewMessage(data) {
+  // #region agent log
+  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:75',message:'handleNewMessage entry',data:{chat_id:data.chat_id,message_id:data.message?.id,sender_id:data.message?.sender_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+  // #endregion
+  
   const { chat_id, message } = data;
+  const authStore = get(auth);
+  
+  // Check if this message is from the current user (sender)
+  const isOwnMessage = message.sender_id === authStore.userId || 
+                       message.sender_username === authStore.username;
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:82',message:'Message ownership check',data:{isOwnMessage,currentUserId:authStore.userId,messageSenderId:message.sender_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+  // #endregion
+  
+  // Set initial status for the message
+  // For own messages: "sent" (will update to "read" when others read it)
+  // For received messages: "unread" if chat is not active, otherwise will be marked as read
+  if (!message.status) {
+    if (isOwnMessage) {
+      message.status = 'sent';
+      message.read_by = message.read_by || [];
+      message.read_count = message.read_count || 0;
+    } else {
+      const currentActiveChatId = get(activeChatId);
+      message.status = (currentActiveChatId === chat_id) ? 'unread' : 'unread';
+      message.read_by = message.read_by || [];
+      message.read_count = message.read_count || 0;
+    }
+  }
   
   // Add message to store
   messages.addMessage(chat_id, message);
   
-  // Update unread count in chats
+  // Check if chat exists in the chats list
+  const currentChats = get(chats);
+  const chatExists = currentChats.some(c => c.id === chat_id);
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:91',message:'Chat existence check',data:{chat_id,chatExists,currentChatsCount:currentChats.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+  // #endregion
+  
+  // If chat doesn't exist, reload chats list to get the new chat
+  // Use backend-provided unread counts (they're persistent and accurate)
+  if (!chatExists) {
+    try {
+      const chatsList = await api.getChats();
+      // Use backend-provided unread_count (it's calculated from database)
+      // Don't preserve client-side counts - backend is the source of truth
+      chats.set(chatsList);
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:97',message:'Chat list reloaded with preserved unread counts',data:{newChatsCount:chatsList.length,preservedUnreadCounts:Array.from(unreadCountsMap.entries())},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
+    } catch (err) {
+      console.error('Failed to reload chats:', err);
+    }
+  }
+  
+  // Automatically connect to this chat if not already connected
+  // This ensures we receive future messages for this chat
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    sendWebSocketMessage('chat.open', {
+      chat_id: chat_id,
+      user_id: authStore.userId
+    });
+  }
+  
+  // Update unread count in chats (only for messages from others)
+  // Do this AFTER any chat list reload to ensure we're working with the latest data
+  const currentActiveChatId = get(activeChatId);
+  // #region agent log
+  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:139',message:'Before unread count update',data:{chat_id,currentActiveChatId,isOwnMessage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+  // #endregion
   chats.update(chatsList => {
     const chat = chatsList.find(c => c.id === chat_id);
     if (chat) {
-      if (get(activeChatId) !== chat_id) {
-        chat.unread_count = (chat.unread_count || 0) + 1;
+      const oldUnreadCount = chat.unread_count || 0;
+      // Only increment unread count if:
+      // 1. This is not the current user's message
+      // 2. The chat is not currently open
+      if (!isOwnMessage && currentActiveChatId !== chat_id) {
+        chat.unread_count = oldUnreadCount + 1;
       }
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:152',message:'Unread count updated',data:{chat_id,oldUnreadCount,newUnreadCount:chat.unread_count,willIncrement:!isOwnMessage && currentActiveChatId !== chat_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+      // #endregion
     }
-    return chatsList;
+    return [...chatsList]; // Return new array to trigger reactivity
   });
   
-  // Mark as read if this chat is currently open
+  // Show browser notification for messages from others when tab is not focused
+  if (!isOwnMessage && typeof window !== 'undefined' && 'Notification' in window) {
+    const isTabFocused = document.hasFocus();
+    if (!isTabFocused && Notification.permission === 'granted') {
+      const chat = currentChats.find(c => c.id === chat_id);
+      const chatTitle = chat?.title || chat?.other_user_name || `Chat ${chat_id}`;
+      const messagePreview = message.content?.substring(0, 50) || '[Media]';
+      
+      new Notification(`${message.sender_username || 'Someone'} - ${chatTitle}`, {
+        body: messagePreview,
+        icon: '/favicon.ico',
+        tag: `chat-${chat_id}`,
+        requireInteraction: false
+      });
+    }
+  }
+  
+  // Mark as read if this chat is currently open AND it's not the current user's message
+  // (You can't "read" your own messages)
   const currentChatId = get(activeChatId);
-  if (currentChatId === chat_id) {
+  if (currentChatId === chat_id && !isOwnMessage) {
     markMessagesAsRead(chat_id, message.id);
   }
 }
@@ -93,13 +197,70 @@ function handleMessageStatus(data) {
   messages.updateMessage(chat_id, message_id, { status });
 }
 
+function handleMessageReadUpdate(data) {
+  // #region agent log
+  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:200',message:'handleMessageReadUpdate entry',data:{chat_id:data.chat_id,message_id:data.message_id,read_by:data.read_by,read_count:data.read_count,data_keys:Object.keys(data)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
+  // #endregion
+  
+  const { chat_id, message_id, read_by, read_count } = data;
+  const authStore = get(auth);
+  
+  // #region agent log
+  const currentMessages = get(messages);
+  const message = currentMessages[chat_id]?.find(m => m.id === message_id);
+  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:210',message:'Before message update',data:{chat_id,message_id,message_found:!!message,message_sender_id:message?.sender_id,current_user_id:authStore.userId,is_own_message:message?.sender_id === authStore.userId,read_count,read_by},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
+  // #endregion
+  
+  // Update message with read status
+  const newStatus = (() => {
+    if (message && message.sender_id === authStore.userId) {
+      // For own messages: "read" if read_count > 0, "sent" otherwise
+      return read_count > 0 ? 'read' : 'sent';
+    }
+    return message?.status; // Keep existing status for received messages
+  })();
+  
+  messages.updateMessage(chat_id, message_id, {
+    read_by: read_by || [],
+    read_count: read_count || 0,
+    status: newStatus
+  });
+  
+  // #region agent log
+  const updatedMessages = get(messages);
+  const updatedMessage = updatedMessages[chat_id]?.find(m => m.id === message_id);
+  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:225',message:'After message update',data:{chat_id,message_id,new_status,updated_message_status:updatedMessage?.status,updated_read_count:updatedMessage?.read_count},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
+  // #endregion
+}
+
 function markMessagesAsRead(chatId, lastMessageId) {
+  // #region agent log
+  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:227',message:'markMessagesAsRead called',data:{chatId,lastMessageId,chatIdIsNull:chatId === null || chatId === undefined,lastMessageIdIsNull:lastMessageId === null || lastMessageId === undefined,chatIdType:typeof chatId,lastMessageIdType:typeof lastMessageId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
+  // #endregion
+  
+  // Validate parameters - be strict about types
+  if (chatId === null || chatId === undefined || chatId === '' || lastMessageId === null || lastMessageId === undefined || lastMessageId === '') {
+    console.error('markMessagesAsRead called with invalid parameters:', { chatId, lastMessageId, chatIdType: typeof chatId, lastMessageIdType: typeof lastMessageId });
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:235',message:'markMessagesAsRead validation failed',data:{chatId,lastMessageId,chatIdType:typeof chatId,lastMessageIdType:typeof lastMessageId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
+    // #endregion
+    return;
+  }
+  
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({
+    const payload = {
       type: 'message.read',
       chat_id: chatId,
       message_id: lastMessageId
-    }));
+    };
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:245',message:'Sending message.read WebSocket event',data:{payload,chat_id:payload.chat_id,message_id:payload.message_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
+    // #endregion
+    socket.send(JSON.stringify(payload));
+  } else {
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:250',message:'WebSocket not ready',data:{socketExists:!!socket,readyState:socket?.readyState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
+    // #endregion
   }
   
   // Update unread count

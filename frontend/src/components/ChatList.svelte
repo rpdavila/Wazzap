@@ -7,6 +7,9 @@
   import { get } from 'svelte/store';
 
   function selectChat(chat) {
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatList.svelte:9',message:'selectChat called',data:{chatId:chat.id,currentActiveChatId:get(activeChatId)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+    // #endregion
     activeChatId.set(chat.id);
     sendWebSocketMessage('chat.open', { 
       chat_id: chat.id,

@@ -20,8 +20,16 @@
   $: currentUsername = $auth.username;
 
   $: if ($activeChatId && $activeChatId !== previousChatId) {
+    // #region agent log
+    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:22',message:'Active chat changed',data:{newChatId:$activeChatId,previousChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+    // #endregion
     previousChatId = $activeChatId;
     loadMessages();
+    // Open the chat via WebSocket to receive messages
+    sendWebSocketMessage('chat.open', {
+      chat_id: $activeChatId,
+      user_id: $auth.userId
+    });
   }
 
   $: if (chatMessages.length > 0 && isAtBottom) {
@@ -29,17 +37,28 @@
   }
 
   async function loadMessages() {
-    if (!$activeChatId || loadingMessages) return;
+    // Capture activeChatId at the start to avoid race conditions
+    const currentChatId = $activeChatId;
+    if (!currentChatId || loadingMessages) return;
 
     loadingMessages = true;
     try {
-      const messageList = await api.getMessages($activeChatId);
-      messages.setMessages($activeChatId, messageList);
+      const messageList = await api.getMessages(currentChatId);
+      messages.setMessages(currentChatId, messageList);
       
-      // Mark messages as read
-      if (messageList.length > 0) {
+      // #region agent log
+      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:44',message:'loadMessages completed',data:{currentChatId,capturedChatId:currentChatId,reactiveChatId:$activeChatId,messageListLength:messageList.length,chatIdChanged:currentChatId !== $activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
+      // #endregion
+      
+      // Mark messages as read - use captured chatId to avoid race conditions
+      if (messageList.length > 0 && currentChatId) {
         const lastMessage = messageList[messageList.length - 1];
-        markChatAsRead($activeChatId, lastMessage.id);
+        if (lastMessage && lastMessage.id) {
+          // #region agent log
+          fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:52',message:'Calling markChatAsRead',data:{currentChatId,lastMessageId:lastMessage.id,messageListLength:messageList.length,reactiveChatId:$activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
+          // #endregion
+          markChatAsRead(currentChatId, lastMessage.id);
+        }
       }
       
       // Scroll to bottom after loading
@@ -68,6 +87,12 @@
 
   function sendMessage() {
     if (!messageInput.trim() || !$activeChatId) return;
+
+    // Ensure we're connected to this chat before sending
+    sendWebSocketMessage('chat.open', {
+      chat_id: $activeChatId,
+      user_id: $auth.userId
+    });
 
     const message = {
       chat_id: $activeChatId,
@@ -158,8 +183,16 @@
               <span class="message-time">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </span>
-              {#if isOwnMessage(message) && message.status}
-                <span class="message-status">{message.status}</span>
+              {#if isOwnMessage(message)}
+                {#if message.status === 'read' || (message.read_count && message.read_count > 0)}
+                  <span class="message-status read">✓✓ Read</span>
+                {:else if message.status === 'sent'}
+                  <span class="message-status sent">✓ Sent</span>
+                {/if}
+              {:else}
+                {#if message.status === 'unread'}
+                  <span class="message-status unread">Unread</span>
+                {/if}
               {/if}
             </div>
           </div>
@@ -307,6 +340,29 @@
 
   .message-status {
     font-size: 0.75rem;
+    margin-left: 0.5rem;
+  }
+  
+  .message-status.read {
+    color: #4a90e2;
+  }
+  
+  /* For own messages (blue background), use white/light color for status */
+  .message.own .message-status.read {
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .message.own .message-status.sent {
+    color: rgba(255, 255, 255, 0.7);
+  }
+  
+  .message-status.sent {
+    color: #999;
+  }
+  
+  .message-status.unread {
+    color: #f44336;
+    font-weight: 500;
   }
 
   .empty-messages {

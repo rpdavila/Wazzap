@@ -120,7 +120,13 @@ export const api = {
   },
 
   async getMessages(chatId) {
-    return request(`/api/chats/${chatId}/messages`);
+    const authStore = get(auth);
+    const params = new URLSearchParams();
+    if (authStore.userId) {
+      params.append('user_id', authStore.userId.toString());
+    }
+    const queryString = params.toString();
+    return request(`/api/chats/${chatId}/messages${queryString ? '?' + queryString : ''}`);
   },
 
   async uploadMedia(file) {

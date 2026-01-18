@@ -18,7 +18,12 @@ from crud import (
     list_chats_for_user,
     list_all_users,
     update_user,
-    delete_user
+    delete_user,
+    get_unread_count,
+    update_last_seen,
+    mark_messages_as_read,
+    get_message_status,
+    get_read_statuses_for_message
 )
 from schema import (
     UserCreate, UserOut,
@@ -36,7 +41,36 @@ import logging
 from dotenv import load_dotenv
 from pathlib import Path
 
-from connection_manager import ConnectionManager
+import importlib
+import sys
+# Import and force reload connection_manager to pick up changes
+# Always reload to ensure we get the latest version from disk
+import connection_manager
+if 'connection_manager' in sys.modules:
+    importlib.reload(sys.modules['connection_manager'])
+# Re-import to get the updated class
+import connection_manager
+ConnectionManager = connection_manager.ConnectionManager
+# #region agent log
+import inspect
+reload_sig = inspect.signature(ConnectionManager.connect)
+log_data = {
+    "sessionId": "debug-session",
+    "runId": "run1",
+    "hypothesisId": "D",
+    "location": "start_backend.py:39",
+    "message": "After import/reload - checking ConnectionManager.connect signature",
+    "data": {
+        "method_signature": str(reload_sig),
+        "param_count": len(reload_sig.parameters),
+        "param_names": list(reload_sig.parameters.keys()),
+        "has_user_id": "user_id" in reload_sig.parameters
+    },
+    "timestamp": int(__import__('time').time() * 1000)
+}
+with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+    f.write(__import__('json').dumps(log_data) + '\n')
+# #endregion
 from starlette.concurrency import run_in_threadpool
 
 # Load .env from root directory first (takes precedence), then backend/.env as fallback
@@ -121,7 +155,28 @@ logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
 # Format: {session_id: {"jwt": jwt_token, "user_id": user_id, "username": username}}
 active_sessions: dict[str, dict] = {}
 
+# Create manager instance after reload to ensure we use the latest class definition
 manager = ConnectionManager()
+# #region agent log
+import inspect
+manager_sig = inspect.signature(manager.connect)
+log_data = {
+    "sessionId": "debug-session",
+    "runId": "run1",
+    "hypothesisId": "E",
+    "location": "start_backend.py:150",
+    "message": "After manager creation - checking instance method signature",
+    "data": {
+        "method_signature": str(manager_sig),
+        "param_count": len(manager_sig.parameters),
+        "param_names": list(manager_sig.parameters.keys()),
+        "has_user_id": "user_id" in manager_sig.parameters
+    },
+    "timestamp": int(__import__('time').time() * 1000)
+}
+with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+    f.write(__import__('json').dumps(log_data) + '\n')
+# #endregion
 
 app = FastAPI(
     title="Wazzap Backend API",
@@ -442,15 +497,19 @@ def get_chats(
     
     chats = list_chats_for_user(db, user_id)
     
-    # Enrich direct message chats with other_user_name
+    # Enrich direct message chats with other_user_name and unread_count
     enriched_chats = []
     for chat in chats:
+        # Calculate unread count for this user in this chat
+        unread_count = get_unread_count(db, chat.id, user_id)
+        
         chat_dict = {
             "id": chat.id,
             "type": chat.type,
             "title": chat.title,
             "created_at": chat.created_at,
-            "other_user_name": None
+            "other_user_name": None,
+            "unread_count": unread_count
         }
         
         # For direct messages, find the other user's name
@@ -477,15 +536,19 @@ def get_chats(
 def get_my_chats(user_id: int, db: Session = Depends(get_db)):
     chats = list_chats_for_user(db, user_id)
     
-    # Enrich direct message chats with other_user_name
+    # Enrich direct message chats with other_user_name and unread_count
     enriched_chats = []
     for chat in chats:
+        # Calculate unread count for this user in this chat
+        unread_count = get_unread_count(db, chat.id, user_id)
+        
         chat_dict = {
             "id": chat.id,
             "type": chat.type,
             "title": chat.title,
             "created_at": chat.created_at,
-            "other_user_name": None
+            "other_user_name": None,
+            "unread_count": unread_count
         }
         
         # For direct messages, find the other user's name
@@ -519,10 +582,75 @@ def get_my_chats(user_id: int, db: Session = Depends(get_db)):
     tags=["Chats"]
 )
 def create_dm(dm: DMCreate, db: Session = Depends(get_db)):
-    # Check if DM exists, else create
+    # #region agent log
+    import json
+    import time
+    log_data = {
+        "sessionId": "debug-session",
+        "runId": "run1",
+        "hypothesisId": "I",
+        "location": "start_backend.py:571",
+        "message": "create_dm called",
+        "data": {
+            "user1_id": dm.user1_id,
+            "user2_id": dm.user2_id
+        },
+        "timestamp": int(time.time() * 1000)
+    }
+    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+        f.write(json.dumps(log_data) + '\n')
+    # #endregion
+    
+    # Check if DM already exists between these two users
+    from crud import find_existing_dm
+    existing_chat = find_existing_dm(db, dm.user1_id, dm.user2_id)
+    
+    # #region agent log
+    log_data = {
+        "sessionId": "debug-session",
+        "runId": "run1",
+        "hypothesisId": "I",
+        "location": "start_backend.py:585",
+        "message": "DM existence check result",
+        "data": {
+            "user1_id": dm.user1_id,
+            "user2_id": dm.user2_id,
+            "existing_chat_id": existing_chat.id if existing_chat else None,
+            "will_create_new": existing_chat is None
+        },
+        "timestamp": int(time.time() * 1000)
+    }
+    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+        f.write(json.dumps(log_data) + '\n')
+    # #endregion
+    
+    if existing_chat:
+        # Return existing chat instead of creating a new one
+        return existing_chat
+    
+    # Create new DM if it doesn't exist
     chat = create_chat(db, "direct", None)
     add_member_to_chat(db, chat.id, dm.user1_id)
     add_member_to_chat(db, chat.id, dm.user2_id)
+    
+    # #region agent log
+    log_data = {
+        "sessionId": "debug-session",
+        "runId": "run1",
+        "hypothesisId": "I",
+        "location": "start_backend.py:602",
+        "message": "New DM created",
+        "data": {
+            "user1_id": dm.user1_id,
+            "user2_id": dm.user2_id,
+            "new_chat_id": chat.id
+        },
+        "timestamp": int(time.time() * 1000)
+    }
+    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+        f.write(json.dumps(log_data) + '\n')
+    # #endregion
+    
     return chat
 
 @api_router.post(
@@ -611,13 +739,38 @@ def send_message(msg: MessageCreate, db: Session = Depends(get_db)):
     description="Get all messages for a specific chat.",
     tags=["Messages"]
 )
-def get_chat_messages(chat_id: int, db: Session = Depends(get_db)):
+def get_chat_messages(
+    chat_id: int,
+    user_id: int = Query(None, description="User ID to get read status for"),
+    db: Session = Depends(get_db)
+):
     messages = get_messages_for_chat(db, chat_id)
     
-    # Enrich messages with sender_username and content field
+    # Get all chat members to check read status
+    members = get_chat_members(db, chat_id)
+    member_ids = [m.user_id for m in members]
+    
+    # Enrich messages with sender_username, content field, and read status
     enriched_messages = []
     for msg in messages:
         sender = get_user(db, msg.sender_id)
+        
+        # Get read status for this message (all users who have read it)
+        read_by = get_read_statuses_for_message(db, msg.id)
+        # Remove sender from read_by (sender doesn't count as "read")
+        read_by = [uid for uid in read_by if uid != msg.sender_id]
+        
+        # Determine status for current user (if provided)
+        user_read_status = None
+        if user_id:
+            if user_id == msg.sender_id:
+                # For own messages, show if read by others
+                user_read_status = "read" if len(read_by) > 0 else "sent"
+            else:
+                # For received messages, show if read by current user
+                status = get_message_status(db, msg.id, user_id)
+                user_read_status = "read" if (status and status.read_at) else "unread"
+        
         message_dict = {
             "id": msg.id,
             "chat_id": msg.chat_id,
@@ -628,7 +781,10 @@ def get_chat_messages(chat_id: int, db: Session = Depends(get_db)):
             "media_url": msg.media_url,
             "content": msg.text if msg.type == "text" else msg.media_url,
             "created_at": msg.created_at,
-            "timestamp": msg.created_at.isoformat() if msg.created_at else None
+            "timestamp": msg.created_at.isoformat() if msg.created_at else None,
+            "read_by": read_by,  # List of user IDs who have read this message
+            "read_count": len(read_by),  # Number of users who have read this message
+            "status": user_read_status  # Status for current user (if user_id provided)
         }
         enriched_messages.append(message_dict)
     
@@ -914,19 +1070,81 @@ async def websocket_endpoint(
     db = SessionLocal()
     
     try:
+        # Track user connection
+        user_id = session['user_id']
+        
         # Send session ready confirmation
         await websocket.send_text(json.dumps({
             "type": "session.ready",
             "session_id": session_id
         }))
-        ws_logger.info(f"WebSocket connected: session_id={session_id}, user_id={session['user_id']}")
+        ws_logger.info(f"WebSocket connected: session_id={session_id}, user_id={user_id}")
+        
+        # #region agent log
+        import inspect
+        import os
+        import connection_manager
+        connect_sig = inspect.signature(manager.connect)
+        connect_file = inspect.getfile(manager.connect)
+        connect_module_file = inspect.getfile(connection_manager.ConnectionManager)
+        log_data = {
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "A",
+            "location": "start_backend.py:928",
+            "message": "Before manager.connect call - checking method signature",
+            "data": {
+                "method_signature": str(connect_sig),
+                "method_file": connect_file,
+                "module_file": connect_module_file,
+                "args_count": len(connect_sig.parameters),
+                "param_names": list(connect_sig.parameters.keys()),
+                "user_id": user_id,
+                "chat_id": 0,
+                "manager_type": str(type(manager)),
+                "has_user_id_param": "user_id" in connect_sig.parameters
+            },
+            "timestamp": int(__import__('time').time() * 1000)
+        }
+        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(__import__('json').dumps(log_data) + '\n')
+        # #endregion
+        
+        # Register user connection (connect to a dummy chat_id 0 to track the user)
+        try:
+            await manager.connect(websocket, 0, user_id)
+        except TypeError as e:
+            # #region agent log
+            log_data = {
+                "sessionId": "debug-session",
+                "runId": "run1",
+                "hypothesisId": "A",
+                "location": "start_backend.py:928",
+                "message": "TypeError caught in manager.connect",
+                "data": {
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "args_passed": 3,
+                    "user_id": user_id
+                },
+                "timestamp": int(__import__('time').time() * 1000)
+            }
+            with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(__import__('json').dumps(log_data) + '\n')
+            # #endregion
+            raise
         
         while True:
             try:
                 data = await websocket.receive_text()
+            except WebSocketDisconnect:
+                # Normal disconnection - let it propagate to outer handler
+                raise
             except Exception as e:
-                ws_logger.error(f"Error receiving WebSocket message: {e}")
-                break
+                # Log other errors but don't break - continue listening
+                ws_logger.error(f"Error receiving WebSocket message: {e}", exc_info=True)
+                # Don't break on other errors - continue the loop to keep connection alive
+                continue
             
             # Parse incoming JSON
             try:
@@ -947,7 +1165,7 @@ async def websocket_endpoint(
                         await websocket.send_text(json.dumps({"error": "Chat not found or not a member"}))
                         continue
                     
-                    await manager.connect(websocket, chat_id)
+                    await manager.connect(websocket, chat_id, user_id)
                     ws_logger.info(f"Chat opened: chat_id={chat_id}, user_id={user_id}")
                     
                 elif msg_type == "message.send":
@@ -973,6 +1191,9 @@ async def websocket_endpoint(
                         sender = await run_in_threadpool(get_user, db, sender_id)
                         sender_username = sender.username if sender else None
                         
+                        # Get initial read status (empty for new messages)
+                        read_by = []
+                        
                         # Broadcast to chat members
                         broadcast_data = {
                             "type": "message.new",
@@ -987,10 +1208,16 @@ async def websocket_endpoint(
                                 "media_url": media_url,
                                 "content": content if msg_type_content == "text" else media_url,
                                 "created_at": message.created_at.isoformat() if hasattr(message, 'created_at') else None,
-                                "timestamp": message.created_at.isoformat() if hasattr(message, 'created_at') else None
+                                "timestamp": message.created_at.isoformat() if hasattr(message, 'created_at') else None,
+                                "read_by": read_by,
+                                "read_count": 0,
+                                "status": None  # Will be set by frontend based on user
                             }
                         }
-                        await manager.broadcast(chat_id, json.dumps(broadcast_data))
+                        # Broadcast to all chat members (including those who haven't opened the chat)
+                        def get_members_for_broadcast(chat_id):
+                            return get_chat_members(db, chat_id)
+                        await manager.broadcast(chat_id, json.dumps(broadcast_data), get_members_for_broadcast)
                         preview = content[:30] + "..." if content and len(content) > 30 else content or "[media]"
                         ws_logger.info(f"Message sent via WS: chat_id={chat_id}, sender_id={sender_id}, preview='{preview}'")
                     except Exception as e:
@@ -1003,7 +1230,111 @@ async def websocket_endpoint(
                 elif msg_type == "message.read":
                     chat_id = payload.get("chat_id")
                     message_id = payload.get("message_id")
-                    # Handle read receipt
+                    
+                    # #region agent log
+                    import json as json_module
+                    import time
+                    log_data = {
+                        "sessionId": "debug-session",
+                        "runId": "run1",
+                        "hypothesisId": "K",
+                        "location": "start_backend.py:1230",
+                        "message": "message.read handler entry",
+                        "data": {
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "user_id": user_id,
+                            "chat_id_is_none": chat_id is None,
+                            "message_id_is_none": message_id is None
+                        },
+                        "timestamp": int(time.time() * 1000)
+                    }
+                    with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                        f.write(json_module.dumps(log_data) + '\n')
+                    # #endregion
+                    
+                    # Validate required parameters
+                    if not chat_id or not message_id:
+                        ws_logger.warning(f"message.read missing required parameters: chat_id={chat_id}, message_id={message_id}")
+                        await websocket.send_text(json.dumps({
+                            "error": "Missing chat_id or message_id",
+                            "type": "error"
+                        }))
+                        continue
+                    
+                    # Update last_seen_at in database
+                    await run_in_threadpool(update_last_seen, db, chat_id, user_id, message_id)
+                    # Mark messages as read in MessageStatus table
+                    marked_message_ids = await run_in_threadpool(
+                        mark_messages_as_read, db, chat_id, user_id, message_id
+                    )
+                    
+                    # Broadcast read status updates to all chat members
+                    # Get all chat members
+                    members = await run_in_threadpool(get_chat_members, db, chat_id)
+                    
+                    # For each marked message, get read status and broadcast update
+                    for marked_msg_id in marked_message_ids:
+                        # Get all read statuses for this message in one query
+                        # This returns a list of user IDs who have read the message
+                        read_by_all = await run_in_threadpool(get_read_statuses_for_message, db, marked_msg_id)
+                        # Remove the current user from read_by (they just read it, but we show who else has read it)
+                        read_by = [uid for uid in read_by_all if uid != user_id]
+                        
+                        # #region agent log
+                        log_data = {
+                            "sessionId": "debug-session",
+                            "runId": "run1",
+                            "hypothesisId": "L",
+                            "location": "start_backend.py:1277",
+                            "message": "Broadcasting read status update",
+                            "data": {
+                                "chat_id": chat_id,
+                                "message_id": marked_msg_id,
+                                "read_by_all": read_by_all,
+                                "read_by": read_by,
+                                "read_count": len(read_by_all),
+                                "read_by_user_id": user_id,
+                                "marked_message_ids_count": len(marked_message_ids)
+                            },
+                            "timestamp": int(time.time() * 1000)
+                        }
+                        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                            f.write(json_module.dumps(log_data) + '\n')
+                        # #endregion
+                        
+                        # Broadcast to all chat members
+                        broadcast_data = {
+                            "type": "message.read.update",
+                            "chat_id": chat_id,
+                            "message_id": marked_msg_id,
+                            "read_by": read_by,
+                            "read_count": len(read_by_all),  # Total count including current user
+                            "read_by_user_id": user_id
+                        }
+                        def get_members_for_broadcast(chat_id):
+                            return get_chat_members(db, chat_id)
+                        await manager.broadcast(chat_id, json.dumps(broadcast_data), get_members_for_broadcast)
+                        
+                        # #region agent log
+                        log_data = {
+                            "sessionId": "debug-session",
+                            "runId": "run1",
+                            "hypothesisId": "L",
+                            "location": "start_backend.py:1300",
+                            "message": "Read status broadcast sent",
+                            "data": {
+                                "chat_id": chat_id,
+                                "message_id": marked_msg_id,
+                                "broadcast_data": broadcast_data
+                            },
+                            "timestamp": int(time.time() * 1000)
+                        }
+                        with open(r'c:\Users\AX\PycharmProjects\Wazzap\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                            f.write(json_module.dumps(log_data) + '\n')
+                        # #endregion
+                    
+                    # Also send confirmation to the sender
                     await websocket.send_text(json.dumps({
                         "type": "message.status",
                         "chat_id": chat_id,
@@ -1021,14 +1352,16 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         # Disconnect from all chats
         try:
-            await manager.disconnect(websocket, None)
+            user_id = session.get('user_id') if 'session' in locals() else None
+            await manager.disconnect(websocket, None, user_id)
         except Exception as e:
             ws_logger.error(f"Error disconnecting WebSocket: {e}")
         ws_logger.info(f"WebSocket disconnected: session_id={session_id}")
     except Exception as e:
         ws_logger.error(f"Unexpected error in WebSocket endpoint: {e}", exc_info=True)
         try:
-            await manager.disconnect(websocket, None)
+            user_id = session.get('user_id') if 'session' in locals() else None
+            await manager.disconnect(websocket, None, user_id)
         except Exception:
             pass
     finally:
