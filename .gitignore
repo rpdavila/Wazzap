@@ -1,23 +1,109 @@
-.idea/
-node_modules
-# vscode
-.vscode/
-# __pycache__
-.__pycache__/
-# Python virtual environments
+# =============================================================================
+# Python
+# =============================================================================
+# Virtual environments
 backend/venv/
 venv/
 env/
 ENV/
-# backend env
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment variables
 backend/.env
 .env
-# frontend
-frontend/.cursor
-# OS
-.DS_Store
-Thumbs.db
-# IDE
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+wazzap.db
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# =============================================================================
+# Node.js / npm
+# =============================================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# =============================================================================
+# IDE / Editors
+# =============================================================================
+# PyCharm
+.idea/
+
+# VSCode
+.vscode/
+
+# Cursor
+.cursor/
+**/.cursor/
+.cursorrules
+
+# Vim
 *.swp
 *.swo
 *~
+*.swn
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# =============================================================================
+# OS Files
+# =============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# =============================================================================
+# Logs
+# =============================================================================
+*.log
+logs/
+*.log.*
+
+# =============================================================================
+# Temporary files
+# =============================================================================
+*.tmp
+*.temp
+.cache/
