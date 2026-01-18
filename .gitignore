@@ -60,6 +60,7 @@ build/
 .cursor/
 **/.cursor/
 .cursorrules
+frontend/.cursor/debug.log
 
 # Vim
 *.swp
