@@ -7,6 +7,7 @@
   import { activeChatId } from './stores/chats.js';
   import { connectWebSocket, disconnectWebSocket } from './services/websocket.js';
   import { api } from './services/api.js';
+  import { debugLog } from './utils/debugLog.js';
   import Login from './components/Login.svelte';
   import ChatList from './components/ChatList.svelte';
   import ChatView from './components/ChatView.svelte';
@@ -28,20 +29,14 @@
   });
 
   async function loadChats() {
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.svelte:29',message:'loadChats entry',data:{isAuthenticated:$auth.isAuthenticated},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
+    debugLog('App.svelte:29', 'loadChats entry', { isAuthenticated: $auth.isAuthenticated }, 'B');
     try {
       const chatsList = await api.getChats();
       chats.set(chatsList);
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.svelte:32',message:'loadChats success',data:{chatsCount:chatsList.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
+      debugLog('App.svelte:32', 'loadChats success', { chatsCount: chatsList.length }, 'B');
     } catch (err) {
       console.error('Failed to load chats:', err);
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.svelte:34',message:'loadChats error caught',data:{errorType:err.constructor.name,errorMessage:err.message,errorStatus:err.status,isApiError:err.status !== undefined,isAuthError:err.status === 401 || err.status === 403},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
+      debugLog('App.svelte:34', 'loadChats error caught', { errorType: err.constructor.name, errorMessage: err.message, errorStatus: err.status, isApiError: err.status !== undefined, isAuthError: err.status === 401 || err.status === 403 }, 'B');
       // Note: If it's a 401/403, the api.js request function will handle logout
       // We don't need to do anything here as the error will propagate
     }

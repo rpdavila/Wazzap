@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { auth } from '../stores/auth.js';
 import { get } from 'svelte/store';
+import { debugLog } from '../utils/debugLog.js';
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -18,9 +19,7 @@ function createTimeoutPromise(timeoutMs) {
 
 async function request(endpoint, options = {}) {
   const authStore = get(auth);
-  // #region agent log
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.js:19',message:'API request entry',data:{endpoint,hasJwt:!!authStore.jwt,hasSessionId:!!authStore.sessionId,isAuthenticated:authStore.isAuthenticated},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
+  debugLog('api.js:19', 'API request entry', { endpoint, hasJwt: !!authStore.jwt, hasSessionId: !!authStore.sessionId, isAuthenticated: authStore.isAuthenticated }, 'C');
   const headers = {
     'Content-Type': 'application/json',
     ...options.headers
@@ -70,9 +69,7 @@ async function request(endpoint, options = {}) {
         // Fallback to status code message
       }
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.js:45',message:'API error response',data:{status:response.status,endpoint:url,errorMessage,isAuthError:response.status === 401 || response.status === 403},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
+    debugLog('api.js:45', 'API error response', { status: response.status, endpoint: url, errorMessage, isAuthError: response.status === 401 || response.status === 403 }, 'A');
     throw new ApiError(errorMessage, response.status);
   }
 
@@ -84,16 +81,12 @@ async function request(endpoint, options = {}) {
     }
     // Re-throw ApiError as-is
     if (err instanceof ApiError) {
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.js:80',message:'ApiError thrown',data:{status:err.status,endpoint:url,message:err.message,isAuthError:err.status === 401 || err.status === 403},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
+      debugLog('api.js:80', 'ApiError thrown', { status: err.status, endpoint: url, message: err.message, isAuthError: err.status === 401 || err.status === 403 }, 'A');
       
       // If we get 401 or 403, the session is invalid - logout
       // Svelte reactivity will automatically redirect to login page
       if (err.status === 401 || err.status === 403) {
-        // #region agent log
-        fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.js:92',message:'Auth error detected, triggering logout',data:{status:err.status,endpoint:url},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
+        debugLog('api.js:92', 'Auth error detected, triggering logout', { status: err.status, endpoint: url }, 'A');
         auth.logout();
       }
       

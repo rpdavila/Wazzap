@@ -7,6 +7,7 @@
   import { sendWebSocketMessage, markChatAsRead } from '../services/websocket.js';
   import { get } from 'svelte/store';
   import { generateAvatar } from '../utils/avatar.js';
+  import { debugLog } from '../utils/debugLog.js';
 
   let messageInput = '';
   let messageContainer;
@@ -26,9 +27,7 @@
 
   $: currentChat = $chats.find(c => c.id === $activeChatId);
   $: chatMessages = $messages[$activeChatId] || [];
-  // #region agent log
-  $: if ($activeChatId) { fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:27',message:'chatMessages reactive update',data:{activeChatId:$activeChatId,messagesCount:chatMessages.length,hasMessages:chatMessages.length > 0,allChatIds:Object.keys($messages)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{}); }
-  // #endregion
+  $: if ($activeChatId) { debugLog('ChatView.svelte:27', 'chatMessages reactive update', { activeChatId: $activeChatId, messagesCount: chatMessages.length, hasMessages: chatMessages.length > 0, allChatIds: Object.keys($messages) }, 'D'); }
   $: currentUsername = $auth.username;
   $: isGroupChat = currentChat?.type === 'group';
   
@@ -56,22 +55,16 @@
   }
 
   $: if ($activeChatId && $activeChatId !== previousChatId) {
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:36',message:'Active chat changed',data:{newChatId:$activeChatId,previousChatId,loadingMessages,currentMessagesCount:($messages[$activeChatId] || []).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
+    debugLog('ChatView.svelte:36', 'Active chat changed', { newChatId: $activeChatId, previousChatId, loadingMessages, currentMessagesCount: ($messages[$activeChatId] || []).length }, 'A');
     previousChatId = $activeChatId;
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:41',message:'Calling loadMessages',data:{chatId:$activeChatId,loadingMessages},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
+    debugLog('ChatView.svelte:41', 'Calling loadMessages', { chatId: $activeChatId, loadingMessages }, 'B');
     loadMessages();
     // Load chat members if group chat
     if (isGroupChat) {
       loadChatMembers();
     }
     // Open the chat via WebSocket to receive messages
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:47',message:'Sending chat.open',data:{chatId:$activeChatId,userId:$auth.userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
+    debugLog('ChatView.svelte:47', 'Sending chat.open', { chatId: $activeChatId, userId: $auth.userId }, 'C');
     sendWebSocketMessage('chat.open', {
       chat_id: $activeChatId,
       user_id: $auth.userId
@@ -85,44 +78,28 @@
   async function loadMessages() {
     // Capture activeChatId at the start to avoid race conditions
     const currentChatId = $activeChatId;
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:57',message:'loadMessages entry',data:{currentChatId,loadingMessages,existingMessagesCount:($messages[currentChatId] || []).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
+    debugLog('ChatView.svelte:57', 'loadMessages entry', { currentChatId, loadingMessages, existingMessagesCount: ($messages[currentChatId] || []).length }, 'E');
     if (!currentChatId || loadingMessages) {
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:60',message:'loadMessages skipped',data:{currentChatId,loadingMessages,reason:!currentChatId ? 'noChatId' : 'alreadyLoading'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
+      debugLog('ChatView.svelte:60', 'loadMessages skipped', { currentChatId, loadingMessages, reason: !currentChatId ? 'noChatId' : 'alreadyLoading' }, 'E');
       return;
     }
 
     loadingMessages = true;
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:65',message:'Calling api.getMessages',data:{currentChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
+      debugLog('ChatView.svelte:65', 'Calling api.getMessages', { currentChatId }, 'E');
       const messageList = await api.getMessages(currentChatId);
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:66',message:'api.getMessages returned',data:{currentChatId,messageListLength:messageList.length,reactiveChatId:$activeChatId,chatIdChanged:currentChatId !== $activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:67',message:'Before setMessages',data:{currentChatId,messageListLength:messageList.length,existingMessagesCount:($messages[currentChatId] || []).length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
+      debugLog('ChatView.svelte:66', 'api.getMessages returned', { currentChatId, messageListLength: messageList.length, reactiveChatId: $activeChatId, chatIdChanged: currentChatId !== $activeChatId }, 'E');
+      debugLog('ChatView.svelte:67', 'Before setMessages', { currentChatId, messageListLength: messageList.length, existingMessagesCount: ($messages[currentChatId] || []).length }, 'F');
       messages.setMessages(currentChatId, messageList);
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:68',message:'After setMessages',data:{currentChatId,messageListLength:messageList.length,reactiveChatId:$activeChatId,storedMessagesCount:($messages[currentChatId] || []).length,chatIdChanged:currentChatId !== $activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
+      debugLog('ChatView.svelte:68', 'After setMessages', { currentChatId, messageListLength: messageList.length, reactiveChatId: $activeChatId, storedMessagesCount: ($messages[currentChatId] || []).length, chatIdChanged: currentChatId !== $activeChatId }, 'F');
       
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:44',message:'loadMessages completed',data:{currentChatId,capturedChatId:currentChatId,reactiveChatId:$activeChatId,messageListLength:messageList.length,chatIdChanged:currentChatId !== $activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
-      // #endregion
+      debugLog('ChatView.svelte:44', 'loadMessages completed', { currentChatId, capturedChatId: currentChatId, reactiveChatId: $activeChatId, messageListLength: messageList.length, chatIdChanged: currentChatId !== $activeChatId }, 'M');
       
       // Mark messages as read - use captured chatId to avoid race conditions
       if (messageList.length > 0 && currentChatId) {
         const lastMessage = messageList[messageList.length - 1];
         if (lastMessage && lastMessage.id) {
-          // #region agent log
-          fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ChatView.svelte:52',message:'Calling markChatAsRead',data:{currentChatId,lastMessageId:lastMessage.id,messageListLength:messageList.length,reactiveChatId:$activeChatId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
-          // #endregion
+          debugLog('ChatView.svelte:52', 'Calling markChatAsRead', { currentChatId, lastMessageId: lastMessage.id, messageListLength: messageList.length, reactiveChatId: $activeChatId }, 'M');
           markChatAsRead(currentChatId, lastMessage.id);
         }
       }
