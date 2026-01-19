@@ -198,14 +198,63 @@ def setup_backend(backend_dir):
                     print(f"    sudo apt install python{sys.version_info.major}.{sys.version_info.minor}-venv")
             sys.exit(1)
     
-    # Install dependencies if missing
-    if not subprocess.run([str(venv_python), "-c", "import uvicorn"], 
-                         capture_output=True, check=False).returncode == 0:
-        print("Installing backend dependencies...")
+    # Check if critical dependencies are installed
+    # Test by actually trying to import the backend module (same way uvicorn will)
+    critical_modules = ["uvicorn", "fastapi", "starlette", "sqlalchemy", "pydantic"]
+    missing_modules = []
+    
+    # First check individual modules
+    for module in critical_modules:
+        check_result = subprocess.run(
+            [str(venv_python), "-c", f"import {module}"],
+            capture_output=True,
+            check=False,
+            text=True,
+            cwd=backend_dir
+        )
+        if check_result.returncode != 0:
+            missing_modules.append(module)
+            if check_result.stderr:
+                print(f"  Warning: Cannot import {module}: {check_result.stderr.strip()[:100]}")
+    
+    # Also test if we can import the actual backend module
+    backend_import_test = subprocess.run(
+        [str(venv_python), "-c", "import sys; sys.path.insert(0, '.'); import start_backend"],
+        capture_output=True,
+        check=False,
+        text=True,
+        cwd=backend_dir
+    )
+    if backend_import_test.returncode != 0 and "fastapi" not in missing_modules and "pydantic" not in str(backend_import_test.stderr):
+        # If individual modules pass but backend import fails, add pydantic to check
+        if "pydantic" in str(backend_import_test.stderr).lower():
+            if "pydantic" not in [m.lower() for m in missing_modules]:
+                missing_modules.append("pydantic")
+    
+    # Install dependencies if any are missing
+    if missing_modules:
+        print(f"Installing backend dependencies (missing: {', '.join(missing_modules)})...")
         try:
+            # First upgrade pip to ensure it's working
+            subprocess.run(
+                [str(venv_python), "-m", "pip", "install", "--upgrade", "pip"],
+                cwd=backend_dir,
+                check=True,
+                shell=platform.system() == "Windows",
+                capture_output=True,
+                text=True
+            )
+            
+            # Install requirements - use --force-reinstall if this is a retry
+            install_cmd = [str(venv_python), "-m", "pip", "install", "-r", str(backend_dir / "requirements.txt")]
+            
+            # If we're missing critical modules, force reinstall to fix any corruption
+            if len(missing_modules) >= 2 or "fastapi" in missing_modules or "pydantic" in missing_modules:
+                print("Force reinstalling dependencies to fix potential corruption...")
+                install_cmd.extend(["--force-reinstall", "--no-cache-dir"])
+            
             result = subprocess.run(
-                [str(venv_python), "-m", "pip", "install", "-r", 
-                 str(backend_dir / "requirements.txt")],
+                install_cmd,
                 cwd=backend_dir,
                 check=True,
                 shell=platform.system() == "Windows",
@@ -213,6 +262,33 @@ def setup_backend(backend_dir):
                 text=True
             )
             print("Dependencies installed.")
+            
+            # Verify critical modules are now available by actually importing them
+            # Use a more thorough check that matches how uvicorn will import
+            still_missing = []
+            for module in critical_modules:
+                # Try importing the module with full error output
+                check_result = subprocess.run(
+                    [str(venv_python), "-c", f"import {module}; print('OK')"],
+                    capture_output=True,
+                    check=False,
+                    text=True
+                )
+                if check_result.returncode != 0:
+                    still_missing.append(module)
+                    if check_result.stderr:
+                        print(f"  Import error for {module}: {check_result.stderr.strip()}")
+            
+            if still_missing:
+                print(f"ERROR: Some modules are still missing after installation: {', '.join(still_missing)}")
+                print("This usually indicates a corrupted venv or Python path issue.")
+                print("\nTry the following:")
+                print(f"1. Remove and recreate the venv:")
+                print(f"   rm -rf {backend_dir / 'venv'}")
+                print(f"   python3 start.py")
+                print(f"\n2. Or manually reinstall in the venv:")
+                print(f"   {venv_python} -m pip install --force-reinstall --no-cache-dir -r {backend_dir / 'requirements.txt'}")
+                sys.exit(1)
         except subprocess.CalledProcessError as e:
             print("ERROR: Failed to install dependencies.")
             print(f"Exit code: {e.returncode}")
@@ -220,6 +296,8 @@ def setup_backend(backend_dir):
                 print(f"Output: {e.stdout}")
             if e.stderr:
                 print(f"Error output: {e.stderr}")
+            print("\nTry installing dependencies manually:")
+            print(f"    {venv_python} -m pip install -r {backend_dir / 'requirements.txt'}")
             sys.exit(1)
     
     return venv_python

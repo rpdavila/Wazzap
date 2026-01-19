@@ -19,7 +19,7 @@
   
   // Test data
   let testUsername = 'admin';
-  let testPin = '1111';
+  let testPin = '0000';
   let testChatId = '';
   let testFile = null;
   
@@ -30,7 +30,7 @@
   let jsonError = null;
   
   // Admin data
-  let adminPin = '1111';
+  let adminPin = '0000';
   let adminAuthenticated = false;
   let adminUsers = [];
   let adminLoading = false;
@@ -186,25 +186,7 @@
   }
 
   function handleFileChange(event) {
-    const file = event.target.files[0];
-    if (!file) {
-      testFile = null;
-      return;
-    }
-    
-    // Validate file type (only JPG and PNG)
-    const allowedExtensions = ['.jpg', '.jpeg', '.png'];
-    const allowedMimeTypes = ['image/jpeg', 'image/png'];
-    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-    
-    if (!allowedExtensions.includes(fileExtension) && !allowedMimeTypes.includes(file.type)) {
-      alert('Please select a .jpg or .png file only');
-      event.target.value = ''; // Clear the input
-      testFile = null;
-      return;
-    }
-    
-    testFile = file;
+    testFile = event.target.files[0];
   }
 
   function clearResults() {
@@ -645,7 +627,7 @@
               </div>
               <div class="input-group">
                 <label>File:</label>
-                <input type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" on:change={handleFileChange} />
+                <input type="file" accept="image/*" on:change={handleFileChange} />
               </div>
               {#if testFile}
                 <div class="file-info">
@@ -717,12 +699,12 @@
           {#if adminOpen}
             <div class="endpoint-content">
               <div class="endpoint-description">
-                Manage all users in the system. Requires admin PIN.
+                Manage all users in the system. Requires admin PIN (default: 0000).
               </div>
               {#if !adminAuthenticated}
                 <div class="input-group">
                   <label>Admin PIN:</label>
-                  <input type="password" bind:value={adminPin} placeholder="Enter admin PIN" />
+                  <input type="password" bind:value={adminPin} placeholder="0000" />
                 </div>
                 <button on:click={adminLogin} disabled={adminLoading}>
                   {adminLoading ? 'Authenticating...' : 'Authenticate as Admin'}

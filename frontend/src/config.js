@@ -1,3 +1,12 @@
+// Helper to check if a string is an IP address
+const isIPAddress = (str) => {
+  // IPv4 pattern
+  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  // IPv6 pattern (simplified - covers most cases)
+  const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  return ipv4Pattern.test(str) || ipv6Pattern.test(str);
+};
+
 // Environment-based configuration
 const getDomain = () => {
   // Can be overridden via environment variable
@@ -49,7 +58,12 @@ export const config = {
       return `${protocol}://localhost:8000`;
     }
     
-    // For production/Docker, use hostname-based routing
+    // For IP addresses, use the same IP with port 8000 (can't use subdomains with IPs)
+    if (isIPAddress(this.domain)) {
+      return `${protocol}://${this.domain}:8000`;
+    }
+    
+    // For production/Docker with domain names, use hostname-based routing
     // Frontend is at chat.<domain>, backend is at chat-api.<domain>
     return `${protocol}://chat-api.${this.domain}`;
   },
@@ -62,12 +76,15 @@ export const config = {
     
     // For localhost, use port-based (development)
     if (this.domain === 'localhost' || this.domain === '127.0.0.1') {
-      const baseUrl = `${wsProtocol}://localhost:8000`;
-      return `${baseUrl}/api/ws`;
+      return `${wsProtocol}://localhost:8000/api/ws`;
     }
     
-    // For production/Docker, use hostname-based routing
-    const baseUrl = `${wsProtocol}://chat-api.${this.domain}`;
-    return `${baseUrl}/api/ws`;
+    // For IP addresses, use the same IP with port 8000 (can't use subdomains with IPs)
+    if (isIPAddress(this.domain)) {
+      return `${wsProtocol}://${this.domain}:8000/api/ws`;
+    }
+    
+    // For production/Docker with domain names, use hostname-based routing
+    return `${wsProtocol}://chat-api.${this.domain}/api/ws`;
   }
 };

@@ -6,6 +6,7 @@ import { messages } from '../stores/messages.js';
 import { activeChatId } from '../stores/chats.js';
 import { api } from './api.js';
 import { get } from 'svelte/store';
+import { debugLog } from '../utils/debugLog.js';
 
 let socket = null;
 let heartbeatInterval = null;
@@ -81,9 +82,7 @@ if (typeof window !== 'undefined' && 'Notification' in window) {
 }
 
 async function handleNewMessage(data) {
-  // #region agent log
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:75',message:'handleNewMessage entry',data:{chat_id:data.chat_id,message_id:data.message?.id,sender_id:data.message?.sender_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-  // #endregion
+  debugLog('websocket.js:75', 'handleNewMessage entry', { chat_id: data.chat_id, message_id: data.message?.id, sender_id: data.message?.sender_id }, 'F');
   
   const { chat_id, message } = data;
   const authStore = get(auth);
@@ -92,9 +91,7 @@ async function handleNewMessage(data) {
   const isOwnMessage = message.sender_id === authStore.userId || 
                        message.sender_username === authStore.username;
   
-  // #region agent log
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:82',message:'Message ownership check',data:{isOwnMessage,currentUserId:authStore.userId,messageSenderId:message.sender_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-  // #endregion
+  debugLog('websocket.js:82', 'Message ownership check', { isOwnMessage, currentUserId: authStore.userId, messageSenderId: message.sender_id }, 'F');
   
   // Set initial status for the message
   // For own messages: "sent" (will update to "read" when others read it)
@@ -119,10 +116,6 @@ async function handleNewMessage(data) {
   const currentChats = get(chats);
   const chatExists = currentChats.some(c => c.id === chat_id);
   
-  // #region agent log
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:91',message:'Chat existence check',data:{chat_id,chatExists,currentChatsCount:currentChats.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-  // #endregion
-  
   // If chat doesn't exist, reload chats list to get the new chat
   // Use backend-provided unread counts (they're persistent and accurate)
   if (!chatExists) {
@@ -131,9 +124,6 @@ async function handleNewMessage(data) {
       // Use backend-provided unread_count (it's calculated from database)
       // Don't preserve client-side counts - backend is the source of truth
       chats.set(chatsList);
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:97',message:'Chat list reloaded with preserved unread counts',data:{newChatsCount:chatsList.length,preservedUnreadCounts:Array.from(unreadCountsMap.entries())},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
     } catch (err) {
       console.error('Failed to reload chats:', err);
     }
@@ -142,9 +132,6 @@ async function handleNewMessage(data) {
   // Automatically connect to this chat if not already connected
   // This ensures we receive future messages for this chat
   if (socket && socket.readyState === WebSocket.OPEN) {
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:145',message:'Auto-sending chat.open from handleNewMessage',data:{chat_id,userId:authStore.userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     sendWebSocketMessage('chat.open', {
       chat_id: chat_id,
       user_id: authStore.userId
@@ -154,9 +141,6 @@ async function handleNewMessage(data) {
   // Update unread count in chats (only for messages from others)
   // Do this AFTER any chat list reload to ensure we're working with the latest data
   const currentActiveChatId = get(activeChatId);
-  // #region agent log
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:139',message:'Before unread count update',data:{chat_id,currentActiveChatId,isOwnMessage},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-  // #endregion
   chats.update(chatsList => {
     const chat = chatsList.find(c => c.id === chat_id);
     if (chat) {
@@ -167,9 +151,6 @@ async function handleNewMessage(data) {
       if (!isOwnMessage && currentActiveChatId !== chat_id) {
         chat.unread_count = oldUnreadCount + 1;
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:152',message:'Unread count updated',data:{chat_id,oldUnreadCount,newUnreadCount:chat.unread_count,willIncrement:!isOwnMessage && currentActiveChatId !== chat_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
     }
     return [...chatsList]; // Return new array to trigger reactivity
   });
@@ -205,18 +186,11 @@ function handleMessageStatus(data) {
 }
 
 function handleMessageReadUpdate(data) {
-  // #region agent log
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:200',message:'handleMessageReadUpdate entry',data:{chat_id:data.chat_id,message_id:data.message_id,read_by:data.read_by,read_count:data.read_count,data_keys:Object.keys(data)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-  // #endregion
-  
   const { chat_id, message_id, read_by, read_count } = data;
   const authStore = get(auth);
   
-  // #region agent log
   const currentMessages = get(messages);
   const message = currentMessages[chat_id]?.find(m => m.id === message_id);
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:210',message:'Before message update',data:{chat_id,message_id,message_found:!!message,message_sender_id:message?.sender_id,current_user_id:authStore.userId,is_own_message:message?.sender_id === authStore.userId,read_count,read_by},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-  // #endregion
   
   // Update message with read status
   const newStatus = (() => {
@@ -232,12 +206,6 @@ function handleMessageReadUpdate(data) {
     read_count: read_count || 0,
     status: newStatus
   });
-  
-  // #region agent log
-  const updatedMessages = get(messages);
-  const updatedMessage = updatedMessages[chat_id]?.find(m => m.id === message_id);
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:225',message:'After message update',data:{chat_id,message_id,new_status,updated_message_status:updatedMessage?.status,updated_read_count:updatedMessage?.read_count},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
-  // #endregion
 }
 
 async function handleChatMemberAdded(data) {
@@ -256,16 +224,9 @@ async function handleChatMemberAdded(data) {
 }
 
 function markMessagesAsRead(chatId, lastMessageId) {
-  // #region agent log
-  fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:227',message:'markMessagesAsRead called',data:{chatId,lastMessageId,chatIdIsNull:chatId === null || chatId === undefined,lastMessageIdIsNull:lastMessageId === null || lastMessageId === undefined,chatIdType:typeof chatId,lastMessageIdType:typeof lastMessageId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
-  // #endregion
-  
   // Validate parameters - be strict about types
   if (chatId === null || chatId === undefined || chatId === '' || lastMessageId === null || lastMessageId === undefined || lastMessageId === '') {
     console.error('markMessagesAsRead called with invalid parameters:', { chatId, lastMessageId, chatIdType: typeof chatId, lastMessageIdType: typeof lastMessageId });
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:235',message:'markMessagesAsRead validation failed',data:{chatId,lastMessageId,chatIdType:typeof chatId,lastMessageIdType:typeof lastMessageId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
-    // #endregion
     return;
   }
   
@@ -275,14 +236,7 @@ function markMessagesAsRead(chatId, lastMessageId) {
       chat_id: chatId,
       message_id: lastMessageId
     };
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:245',message:'Sending message.read WebSocket event',data:{payload,chat_id:payload.chat_id,message_id:payload.message_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
-    // #endregion
     socket.send(JSON.stringify(payload));
-  } else {
-    // #region agent log
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:250',message:'WebSocket not ready',data:{socketExists:!!socket,readyState:socket?.readyState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
-    // #endregion
   }
   
   // Update unread count
@@ -326,9 +280,6 @@ export function connectWebSocket() {
     
     socket.onerror = (error) => {
       console.error('WebSocket error:', error);
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:324',message:'WebSocket onerror',data:{readyState:socket.readyState,error:error.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       // Check if connection was rejected (e.g., 403 Forbidden)
       // This happens when the server rejects the connection before it opens
       if (socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
@@ -336,17 +287,11 @@ export function connectWebSocket() {
         // Don't mark as invalid immediately, let onclose handle it based on the close code
         console.log('WebSocket connection rejected');
         connectionRejected = true;
-        // #region agent log
-        fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:332',message:'WebSocket connection rejected flag set',data:{readyState:socket.readyState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
       }
     };
     
     socket.onclose = (event) => {
       console.log('WebSocket closed', event.code, event.reason);
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:336',message:'WebSocket onclose',data:{code:event.code,reason:event.reason,wasClean:event.wasClean},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       websocket.set({ connected: false, socket: null });
       stopHeartbeat();
       
@@ -372,17 +317,10 @@ export function connectWebSocket() {
         // it's likely a session invalidation (FastAPI may convert 403 to 1006)
         (connectionRejected && event.code === 1006 && !event.wasClean);
       
-      // #region agent log
-      fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:350',message:'WebSocket close validation',data:{code:event.code,reason:event.reason,isSessionExplicitlyInvalid,willLogout:isSessionExplicitlyInvalid},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
-      
       // If session is invalid (either 1008 with invalid token, or 1001 with session expired),
       // logout and redirect to login - don't try to reconnect
       if (isSessionExplicitlyInvalid) {
         console.log('Session explicitly invalidated, clearing auth and redirecting to login...');
-        // #region agent log
-        fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:355',message:'WebSocket triggering logout',data:{code:event.code,reason:event.reason},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
         // Store message for login page
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('session_revalidation_message', 'true');
@@ -424,11 +362,6 @@ export function disconnectWebSocket() {
 }
 
 export function sendWebSocketMessage(type, data) {
-  // #region agent log
-  if (type === 'chat.open') {
-    fetch('http://127.0.0.1:7247/ingest/6e3d4334-3650-455b-b2c2-2943a80ca994',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'websocket.js:423',message:'sendWebSocketMessage chat.open',data:{type,chatId:data?.chat_id,userId:data?.user_id,socketReady:socket?.readyState === WebSocket.OPEN},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  }
-  // #endregion
   const ws = get(websocket);
   if (ws.socket && ws.socket.readyState === WebSocket.OPEN) {
     ws.socket.send(JSON.stringify({ type, ...data }));
