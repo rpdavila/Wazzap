@@ -13,6 +13,7 @@
   import DebugPage from './components/DebugPage.svelte';
   import Dashboard from './components/Dashboard.svelte';
   import { currentView } from './stores/view.js';
+  import { generateAvatar } from './utils/avatar.js';
 
   onMount(async () => {
     // If already authenticated, connect WebSocket and load chats
@@ -55,6 +56,12 @@
   }
 
   $: wsStatus = $websocket.connected ? 'connected' : 'disconnected';
+  
+  function getUserAvatar() {
+    // Generate avatar based on username or userId
+    const avatarId = $auth.username || $auth.userId || 'user';
+    return generateAvatar(avatarId, 32);
+  }
 </script>
 
 {#if $currentView === 'debug'}
@@ -66,6 +73,9 @@
     <header class="app-header">
       <div class="header-content">
         <div class="user-info">
+          <div class="user-avatar">
+            <img src={getUserAvatar()} alt="" />
+          </div>
           <span class="username">{$auth.username}</span>
         </div>
         <div class="header-right">
@@ -89,6 +99,9 @@
     <header class="app-header">
       <div class="header-content">
         <div class="user-info">
+          <div class="user-avatar">
+            <img src={getUserAvatar()} alt="" />
+          </div>
           <span class="username">{$auth.username}</span>
         </div>
         <div class="header-right">
@@ -150,6 +163,23 @@
   .user-info {
     display: flex;
     align-items: center;
+    gap: 0.75rem;
+  }
+
+  .user-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background-color: #f0f0f0;
+  }
+
+  .user-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .username {

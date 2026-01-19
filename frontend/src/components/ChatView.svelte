@@ -6,6 +6,7 @@
   import { api } from '../services/api.js';
   import { sendWebSocketMessage, markChatAsRead } from '../services/websocket.js';
   import { get } from 'svelte/store';
+  import { generateAvatar } from '../utils/avatar.js';
 
   let messageInput = '';
   let messageContainer;
@@ -444,6 +445,12 @@
     selectedMessageForReadStatus = null;
     readStatusMembers = [];
   }
+
+  function getMemberAvatar(member) {
+    // Generate avatar based on username or user_id
+    const avatarId = member.username || member.user_id || 'user';
+    return generateAvatar(avatarId, 32);
+  }
 </script>
 
 {#if $activeChatId && currentChat}
@@ -669,7 +676,7 @@
           {#each readStatusMembers as member (member.user_id)}
             <div class="read-status-item">
               <div class="member-avatar-small">
-                {(member.username || 'Unknown').charAt(0).toUpperCase()}
+                <img src={getMemberAvatar(member)} alt="" />
               </div>
               <div class="member-info">
                 <div class="member-name">
@@ -753,7 +760,7 @@
   .messages-container {
     flex: 1;
     overflow-y: auto;
-    padding: 0.6rem 0.85rem;
+    padding: 0.6rem 0.85rem 0.25rem 0.85rem;
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
@@ -779,6 +786,8 @@
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
     position: relative;
+    opacity: 1;
+    filter: none;
   }
 
   .message-content:hover {
@@ -863,6 +872,10 @@
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     transition: all 0.2s ease;
+    opacity: 1;
+    filter: none;
+    background: transparent;
+    mix-blend-mode: normal;
   }
 
   .media-message:hover {
@@ -876,6 +889,14 @@
     display: block;
     width: 100%;
     height: auto;
+    opacity: 1;
+    filter: none;
+    image-rendering: auto;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    transform: translateZ(0);
+    background: transparent;
+    mix-blend-mode: normal;
   }
 
   .media-overlay {
@@ -884,19 +905,20 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.6));
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.7));
     color: white;
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: center;
-    opacity: 0;
-    transition: opacity 0.2s ease;
     font-weight: 500;
     font-size: 0.85rem;
+    pointer-events: none;
+    z-index: 1;
   }
 
   .media-message:hover .media-overlay {
-    opacity: 1;
+    display: flex;
+    pointer-events: auto;
   }
 
   .message-meta {
@@ -1513,14 +1535,16 @@
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background-color: #4a90e2;
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 0.875rem;
+    overflow: hidden;
+    background-color: #f0f0f0;
     flex-shrink: 0;
+  }
+
+  .member-avatar-small img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .member-info {

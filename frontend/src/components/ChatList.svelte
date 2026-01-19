@@ -107,7 +107,7 @@
     const avatarId = chat.type === 'direct' 
       ? (chat.other_user_name || chat.id)
       : (chat.title || chat.id);
-    return generateAvatar(avatarId, 48);
+    return generateAvatar(avatarId, 40);
   }
 
   function toggleDropdown() {
@@ -341,7 +341,12 @@
         </div>
         <div class="chat-item-content">
           <div class="chat-type-label" class:group={chat.type === 'group'} class:direct={chat.type === 'direct'}>
-            {chat.type === 'group' ? 'Group' : 'Direct Message'}
+            {#if chat.type === 'group'}
+              <span class="group-icon">👥</span>
+              <span>Group</span>
+            {:else}
+              <span>Direct Message</span>
+            {/if}
           </div>
           <div class="chat-title">{getChatTitle(chat)}</div>
         </div>
@@ -736,39 +741,70 @@
     background-color: #e3f2fd;
   }
 
-  .chat-type-label {
-    font-size: 0.625rem;
-    font-weight: 600;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+  .chat-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    overflow: hidden;
     flex-shrink: 0;
-    min-width: 36px;
-    text-align: center;
+    background-color: #f0f0f0;
   }
 
-  .chat-type-label.group {
-    background-color: #4a90e2;
-    color: white;
-  }
-
-  .chat-type-label.direct {
-    background-color: #e3f2fd;
-    color: #1976d2;
+  .chat-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .chat-item-content {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .chat-type-label {
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #666;
+    line-height: 1.2;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .chat-type-label.group {
+    color: #4a90e2;
+    background-color: #e3f2fd;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    display: inline-flex;
+    width: fit-content;
+    font-size: 0.6875rem;
+    font-weight: 700;
+  }
+
+  .chat-type-label.group .group-icon {
+    font-size: 0.75rem;
+    line-height: 1;
+  }
+
+  .chat-type-label.direct {
+    color: #1976d2;
   }
 
   .chat-title {
     font-weight: 500;
+    font-size: 0.9375rem;
     color: #333;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.3;
   }
 
   .chat-item-actions {
