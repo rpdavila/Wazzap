@@ -30,11 +30,36 @@ def log_debug(location, message, data=None, hypothesis_id=None):
         pass  # Silently fail if logging doesn't work
 # #endregion
 
+def check_npm_available():
+    """Check if npm is available in the system."""
+    try:
+        result = subprocess.run(
+            ["npm", "--version"],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+
 def main():
     """Start the Vite development server."""
     # #region agent log
     log_debug("start_client.py:main", "Function entry", {"platform": platform.system()}, "A")
     # #endregion
+    
+    # Check if npm is available
+    if not check_npm_available():
+        print("ERROR: npm is not found. Node.js and npm are required to run the frontend.", file=sys.stderr)
+        print("\nTo install Node.js and npm on Debian/Ubuntu:", file=sys.stderr)
+        print("    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -", file=sys.stderr)
+        print("    sudo apt-get install -y nodejs", file=sys.stderr)
+        print("\nOr use the default package manager:", file=sys.stderr)
+        print("    sudo apt update", file=sys.stderr)
+        print("    sudo apt install nodejs npm", file=sys.stderr)
+        print("\nAfter installing, verify with: npm --version", file=sys.stderr)
+        sys.exit(1)
     
     cwd = os.getcwd()
     # #region agent log
@@ -76,6 +101,10 @@ def main():
             # #region agent log
             log_debug("start_client.py:main", "Vite binary check after install", {"exists": vite_exists_after, "path": str(vite_bin_path)}, "B")
             # #endregion
+        except FileNotFoundError:
+            print("ERROR: npm command not found. Please ensure Node.js and npm are installed.", file=sys.stderr)
+            print("See installation instructions above.", file=sys.stderr)
+            sys.exit(1)
         except subprocess.CalledProcessError as e:
             # #region agent log
             log_debug("start_client.py:main", "npm install failed", {"error": str(e), "returncode": e.returncode, "stdout": getattr(e, "stdout", ""), "stderr": getattr(e, "stderr", "")}, "A")
@@ -110,6 +139,18 @@ def main():
         # #endregion
         # Don't capture output for dev server so user can see it
         subprocess.run(["npm", "run", "dev"], check=True, shell=use_shell, cwd=cwd)
+    except FileNotFoundError:
+        # #region agent log
+        log_debug("start_client.py:main", "npm not found", {"error": "npm command not found"}, "A")
+        # #endregion
+        print("ERROR: npm command not found. Please ensure Node.js and npm are installed.", file=sys.stderr)
+        print("\nTo install Node.js and npm on Debian/Ubuntu:", file=sys.stderr)
+        print("    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -", file=sys.stderr)
+        print("    sudo apt-get install -y nodejs", file=sys.stderr)
+        print("\nOr use the default package manager:", file=sys.stderr)
+        print("    sudo apt update", file=sys.stderr)
+        print("    sudo apt install nodejs npm", file=sys.stderr)
+        sys.exit(1)
     except subprocess.CalledProcessError as e:
         # #region agent log
         log_debug("start_client.py:main", "npm run dev failed", {"error": str(e), "returncode": e.returncode}, "A")
@@ -119,13 +160,6 @@ def main():
             print(f"stdout: {e.stdout}", file=sys.stderr)
         if hasattr(e, "stderr") and e.stderr:
             print(f"stderr: {e.stderr}", file=sys.stderr)
-        sys.exit(1)
-    except FileNotFoundError as e:
-        # #region agent log
-        log_debug("start_client.py:main", "npm not found", {"error": str(e)}, "A")
-        # #endregion
-        print("Error: npm not found. Please install Node.js and npm.", file=sys.stderr)
-        print("Make sure Node.js is installed and npm is in your PATH.", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
