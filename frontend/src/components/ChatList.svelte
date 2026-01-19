@@ -6,7 +6,9 @@
   import { currentView } from '../stores/view.js';
   import { auth } from '../stores/auth.js';
   import { api } from '../services/api.js';
+  import { backgroundSettings } from '../stores/backgroundSettings.js';
   import { get } from 'svelte/store';
+  import { generateAvatar } from '../utils/avatar.js';
 
   let dropdownRef;
   let newChatButtonRef;
@@ -26,6 +28,22 @@
   let chatMenuRefs = {};
   let showDeleteConfirm = false;
   let chatToDelete = null;
+  let showBackgroundSettings = false;
+  
+  // Local copy of background settings for editing
+  let localBgSettings = {
+    primaryColor: '#e5e5f7', // Back Color (background)
+    secondaryColor: '#444cf7', // Front Color (pattern)
+    opacity: 0.8, // Match magicpattern.design default
+    spacing: 30,
+    patternType: 'zigzag'
+  };
+  
+  // Sync with store
+  $: {
+    const storeSettings = $backgroundSettings;
+    localBgSettings = { ...storeSettings };
+  }
 
   $: filteredUsers = users.filter(user => 
     user.id !== $auth.userId && 
@@ -82,6 +100,14 @@
 
   function getChatTitle(chat) {
     return chat.title || chat.other_user_name || `Chat ${chat.id}`;
+  }
+
+  function getChatAvatar(chat) {
+    // For direct messages, use other_user_name; for groups, use chat title or ID
+    const avatarId = chat.type === 'direct' 
+      ? (chat.other_user_name || chat.id)
+      : (chat.title || chat.id);
+    return generateAvatar(avatarId, 48);
   }
 
   function toggleDropdown() {
@@ -233,6 +259,21 @@
     showDeleteConfirm = false;
     chatToDelete = null;
   }
+  
+  function openBackgroundSettings(event) {
+    if (event) event.stopPropagation();
+    showBackgroundSettings = true;
+    closeChatMenu();
+  }
+  
+  function closeBackgroundSettings() {
+    showBackgroundSettings = false;
+  }
+  
+  function resetBackgroundSettings() {
+    backgroundSettings.reset();
+    localBgSettings = { ...$backgroundSettings };
+  }
 
   async function deleteChat() {
     if (!chatToDelete) return;
@@ -295,10 +336,13 @@
         tabindex="0"
         on:keypress={(e) => e.key === 'Enter' && selectChat(chat)}
       >
-        <div class="chat-type-label" class:group={chat.type === 'group'} class:direct={chat.type === 'direct'}>
-          {chat.type === 'group' ? 'Group' : 'DM'}
+        <div class="chat-avatar">
+          <img src={getChatAvatar(chat)} alt="" />
         </div>
         <div class="chat-item-content">
+          <div class="chat-type-label" class:group={chat.type === 'group'} class:direct={chat.type === 'direct'}>
+            {chat.type === 'group' ? 'Group' : 'Direct Message'}
+          </div>
           <div class="chat-title">{getChatTitle(chat)}</div>
         </div>
         <div class="chat-item-actions">
@@ -319,6 +363,13 @@
               bind:this={chatMenuRefs[chat.id]}
               on:click|stopPropagation
             >
+              <button 
+                class="chat-menu-item"
+                on:click={(e) => openBackgroundSettings(e)}
+              >
+                <span class="menu-icon">🎨</span>
+                Background Settings
+              </button>
               <button 
                 class="chat-menu-item delete-chat"
                 on:click={(e) => openDeleteConfirm(chat, e)}
@@ -382,6 +433,84 @@
             {/each}
           </div>
         {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Background Settings Modal -->
+{#if showBackgroundSettings}
+  <div class="modal-overlay" on:click={closeBackgroundSettings}>
+    <div class="modal-content background-settings-modal" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>Background Settings</h3>
+        <button class="modal-close" on:click={closeBackgroundSettings}>×</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-section">
+          <label class="settings-label">
+            <span>Pattern Type</span>
+            <select value={localBgSettings.patternType} on:change={(e) => {
+              localBgSettings.patternType = e.target.value;
+              backgroundSettings.update(localBgSettings);
+            }}>
+              <option value="zigzag">ZigZag</option>
+              <option value="isometric">Isometric</option>
+              <option value="polka">Polka v1</option>
+              <option value="polka-v2">Polka v2</option>
+              <option value="cross">Cross</option>
+            </select>
+          </label>
+        </div>
+        
+        <div class="settings-section">
+          <label class="settings-label">
+            <span>Back Color</span>
+            <input type="color" value={localBgSettings.primaryColor} on:input={(e) => {
+              localBgSettings.primaryColor = e.target.value;
+              backgroundSettings.update(localBgSettings);
+            }} />
+          </label>
+        </div>
+        
+        <div class="settings-section">
+          <label class="settings-label">
+            <span>Front Color</span>
+            <input type="color" value={localBgSettings.secondaryColor} on:input={(e) => {
+              localBgSettings.secondaryColor = e.target.value;
+              backgroundSettings.update(localBgSettings);
+            }} />
+          </label>
+        </div>
+        
+        <div class="settings-section">
+          <label class="settings-label">
+            <span>Opacity: {Math.round(localBgSettings.opacity * 100)}%</span>
+            <input type="range" min="0" max="1" step="0.01" value={localBgSettings.opacity} on:input={(e) => {
+              localBgSettings.opacity = parseFloat(e.target.value);
+              backgroundSettings.update(localBgSettings);
+            }} />
+          </label>
+        </div>
+        
+        <div class="settings-section">
+          <label class="settings-label">
+            <span>Spacing: {localBgSettings.spacing}px</span>
+            <input type="range" min="10" max="60" step="5" value={localBgSettings.spacing} on:input={(e) => {
+              localBgSettings.spacing = parseInt(e.target.value);
+              backgroundSettings.update(localBgSettings);
+            }} />
+          </label>
+        </div>
+        
+        <div class="settings-section">
+          <label class="settings-label">
+          </label>
+        </div>
+        
+        <div class="modal-actions">
+          <button class="reset-button" on:click={resetBackgroundSettings}>Reset to Default</button>
+        </div>
       </div>
     </div>
   </div>
@@ -752,7 +881,7 @@
   }
 
   .modal-content {
-    background-color: white;
+    background-color: white !important;
     border-radius: 8px;
     width: 90%;
     max-width: 500px;
@@ -760,6 +889,7 @@
     display: flex;
     flex-direction: column;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    opacity: 1 !important;
   }
 
   .modal-header {
@@ -768,6 +898,112 @@
     align-items: center;
     padding: 1rem;
     border-bottom: 1px solid #e0e0e0;
+    background-color: white;
+  }
+  
+  .background-settings-modal {
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    background-color: white;
+    opacity: 1;
+  }
+
+  .background-settings-modal .modal-body {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    overflow-y: auto;
+    background-color: white !important;
+    opacity: 1 !important;
+  }
+
+  .settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .settings-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  .settings-label span {
+    font-weight: 500;
+    color: #333;
+  }
+
+  .settings-label input[type="color"] {
+    width: 100%;
+    height: 40px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    cursor: pointer;
+    background-color: white;
+  }
+
+  .settings-label input[type="range"] {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: #e0e0e0;
+    outline: none;
+    -webkit-appearance: none;
+  }
+
+  .settings-label input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #4a90e2;
+    cursor: pointer;
+  }
+
+  .settings-label input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #4a90e2;
+    cursor: pointer;
+    border: none;
+  }
+
+  .settings-label select {
+    padding: 0.5rem;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    background: white;
+    cursor: pointer;
+  }
+
+  .settings-label select:focus {
+    outline: none;
+    border-color: #4a90e2;
+  }
+
+  .reset-button {
+    padding: 0.625rem 1.25rem;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-top: 0.5rem;
+  }
+
+  .reset-button:hover {
+    background-color: #c82333;
   }
 
   .modal-header h3 {

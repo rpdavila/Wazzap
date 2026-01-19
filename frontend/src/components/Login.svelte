@@ -39,8 +39,8 @@
     try {
       let response;
       
-      // Development bypass: allow admin/0000 without server check
-      if (username.trim().toLowerCase() === 'admin' && pin === '0000') {
+      // Development bypass: allow admin/1111 without server check
+      if (username.trim().toLowerCase() === 'admin' && pin === '1111') {
         // Generate mock JWT and session_id for development
         const mockJwt = 'dev-mock-jwt-' + Date.now();
         const mockSessionId = 'dev-session-' + Date.now();
@@ -177,8 +177,8 @@
       // Auto-login after successful registration
       let response;
       
-      // Development bypass: allow admin/0000 without server check
-      if (username.trim().toLowerCase() === 'admin' && pin === '0000') {
+      // Development bypass: allow admin/1111 without server check
+      if (username.trim().toLowerCase() === 'admin' && pin === '1111') {
         const mockJwt = 'dev-mock-jwt-' + Date.now();
         const mockSessionId = 'dev-session-' + Date.now();
         response = {

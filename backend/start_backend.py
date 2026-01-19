@@ -331,7 +331,7 @@ app = FastAPI(
     
     ## Admin Mode
     
-    Admin endpoints require PIN authentication (default: `0000`). Use the `/api/admin/auth` endpoint to authenticate and get an admin token.
+    Admin endpoints require PIN authentication. Use the `/api/admin/auth` endpoint to authenticate and get an admin token.
     
     Admin endpoints allow:
     - Viewing all users
@@ -1415,11 +1415,11 @@ def get_chat_messages(
     response_model=MediaUploadResponse,
     summary="Upload media",
     description="""
-    Upload a media file (image or GIF) for use in chat messages.
+    Upload a media file for use in chat messages.
     
     **Request:**
     - `file`: Media file to upload (multipart/form-data)
-      - Supported formats: Images (JPG, PNG, GIF, etc.)
+      - Supported formats: JPG and PNG only
       - File size limits may apply
     
     **Response:**
@@ -1444,9 +1444,23 @@ def upload_media(request: Request, file: UploadFile = File(...)):
         f.write(json_lib.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"start_backend.py:633","message":"upload_media called","data":{"filename":file.filename,"content_type":file.content_type},"timestamp":int(__import__('time').time()*1000)}) + '\n')
     # #endregion
     
+    # Validate file type (only JPG and PNG allowed)
+    allowed_extensions = ['.jpg', '.jpeg', '.png']
+    allowed_mime_types = ['image/jpeg', 'image/png']
+    
+    if file.filename:
+        file_ext = Path(file.filename).suffix.lower()
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="Only .jpg and .png files are allowed")
+    else:
+        file_ext = '.jpg'
+    
+    # Also validate MIME type if available
+    if file.content_type and file.content_type not in allowed_mime_types:
+        raise HTTPException(status_code=400, detail="Only .jpg and .png files are allowed")
+    
     # Generate unique filename
     import uuid
-    file_ext = Path(file.filename).suffix if file.filename else '.jpg'
     unique_filename = f"{uuid.uuid4()}{file_ext}"
     file_path = MEDIA_DIR / unique_filename
     
@@ -1485,7 +1499,7 @@ def upload_media(request: Request, file: UploadFile = File(...)):
 # -------------------------------
 # ADMIN
 # -------------------------------
-ADMIN_PIN = "0000"
+ADMIN_PIN = "1111"
 
 def verify_admin_pin(pin: str) -> bool:
     """Verify admin PIN."""
@@ -1499,7 +1513,7 @@ def verify_admin_pin(pin: str) -> bool:
     Authenticate as admin using PIN to get an admin token.
     
     **Request Body:**
-    - `pin`: Admin PIN (default: 0000)
+    - `pin`: Admin PIN
     
     **Response:**
     - `admin_token`: Admin authentication token
@@ -1507,7 +1521,6 @@ def verify_admin_pin(pin: str) -> bool:
     
     **Note:**
     - Admin token can be used for admin operations
-    - Default admin PIN is `0000` (change in production!)
     """,
     tags=["Admin"]
 )
@@ -1524,7 +1537,7 @@ def admin_auth(auth_data: AdminAuth, db: Session = Depends(get_db)):
     "/admin/users",
     response_model=list[UserOut],
     summary="List all users (Admin)",
-    description="List all users in the system. Requires admin PIN (default: 0000).",
+    description="List all users in the system. Requires admin PIN.",
     tags=["Admin"]
 )
 def list_users(
@@ -1545,7 +1558,7 @@ def list_users(
     Get detailed information about a specific user by their ID.
     
     **Query Parameters:**
-    - `admin_pin`: Admin PIN (default: 0000)
+    - `admin_pin`: Admin PIN
     
     **Path Parameters:**
     - `user_id`: ID of the user to retrieve
@@ -1581,7 +1594,7 @@ def get_user_admin(
     Update user information (username and/or PIN).
     
     **Query Parameters:**
-    - `admin_pin`: Admin PIN (default: 0000)
+    - `admin_pin`: Admin PIN
     
     **Path Parameters:**
     - `user_id`: ID of the user to update
@@ -1641,7 +1654,7 @@ def update_user_admin(
     Delete a user from the system. This action cannot be undone.
     
     **Query Parameters:**
-    - `admin_pin`: Admin PIN (default: 0000)
+    - `admin_pin`: Admin PIN
     
     **Path Parameters:**
     - `user_id`: ID of the user to delete
@@ -1678,7 +1691,7 @@ def delete_user_admin(
     Create a new user account via admin interface.
     
     **Query Parameters:**
-    - `admin_pin`: Admin PIN (default: 0000)
+    - `admin_pin`: Admin PIN
     
     **Request Body:**
     - `username`: Username (3-64 characters)
@@ -1724,7 +1737,7 @@ def create_user_admin(
     - All media references
     
     **Query Parameters:**
-    - `admin_pin`: Admin PIN (default: 0000)
+    - `admin_pin`: Admin PIN
     
     **Response:**
     - Returns confirmation message and status

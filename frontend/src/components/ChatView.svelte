@@ -31,6 +31,24 @@
   $: currentUsername = $auth.username;
   $: isGroupChat = currentChat?.type === 'group';
   
+  // Convert hex to rgba with opacity
+  function hexToRgba(hex, opacity) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+  }
+
+  // Fixed background pattern for all chats
+  const chatBackgroundStyle = {
+    backgroundColor: '#f3f3f3',
+    opacity: 0.7,
+    backgroundImage: 'radial-gradient(#1c64b7 0.9500000000000001px, transparent 0.9500000000000001px), radial-gradient(#1c64b7 0.9500000000000001px, #f3f3f3 0.9500000000000001px)',
+    backgroundSize: '38px 38px',
+    backgroundPosition: '0 0,19px 19px'
+  };
+  
+  
   // Load chat members when chat changes and it's a group chat
   $: if (isGroupChat && $activeChatId && chatMembers.length === 0) {
     loadChatMembers();
@@ -156,9 +174,13 @@
     const file = event.target.files[0];
     if (!file || !$activeChatId) return;
 
-    // Validate file type (images or GIFs)
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload an image file');
+    // Validate file type (only JPG and PNG)
+    const allowedExtensions = ['.jpg', '.jpeg', '.png'];
+    const allowedMimeTypes = ['image/jpeg', 'image/png'];
+    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+    
+    if (!allowedExtensions.includes(fileExtension) && !allowedMimeTypes.includes(file.type)) {
+      alert('Please upload a .jpg or .png file only');
       return;
     }
 
@@ -444,13 +466,16 @@
       class="messages-container"
       bind:this={messageContainer}
       on:scroll={handleScroll}
+      style="background-color: {chatBackgroundStyle.backgroundColor}; opacity: {chatBackgroundStyle.opacity}; background-image: {chatBackgroundStyle.backgroundImage}; background-size: {chatBackgroundStyle.backgroundSize}; background-position: {chatBackgroundStyle.backgroundPosition};"
     >
       {#each chatMessages as message (message.id)}
         {#if message.type === 'system'}
-          <div class="system-message-container">
-            <div class="system-message-text">{message.content}</div>
-            <div class="system-message-time">
-              {new Date(message.timestamp).toLocaleTimeString()}
+          <div class="system-message-container" style="position: relative; z-index: 1;">
+            <div class="system-message-text">
+              <div class="system-message-content">{message.content}</div>
+              <div class="system-message-time">
+                {new Date(message.timestamp).toLocaleTimeString()}
+              </div>
             </div>
           </div>
         {:else}
@@ -463,7 +488,7 @@
           {@const someRead = isGroupChat 
             ? (readCount > 0)  // Some have read (excluding sender)
             : (isOwn ? (readCount > 0) : (message.status === 'read' || (message.read_by && message.read_by.includes($auth.userId))))}
-          <div class="message" class:own={isOwnMessage(message)}>
+          <div class="message" class:own={isOwnMessage(message)} style="position: relative; z-index: 1;">
           <div class="message-content">
               {#if message.type === 'media'}
                 <div class="media-message" on:click={() => openMediaModal(message.content)}>
@@ -498,20 +523,22 @@
           </div>
         {/if}
       {:else}
-        <div class="empty-messages">No messages yet. Start the conversation!</div>
+        <div class="empty-messages" style="position: relative; z-index: 1;">No messages yet. Start the conversation!</div>
       {/each}
     </div>
 
     <div class="message-input-container">
       <input
         type="file"
-        accept="image/*"
+        accept=".jpg,.jpeg,.png,image/jpeg,image/png"
         id="media-upload"
         on:change={handleMediaUpload}
         style="display: none;"
       />
       <label for="media-upload" class="media-button" title="Upload image">
-        📎
+        <svg class="media-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/>
+        </svg>
       </label>
       <input
         type="text"
@@ -730,24 +757,17 @@
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    background-color: #fafbfc;
+    position: relative;
   }
 
   .message {
     display: flex;
     margin-bottom: 0.25rem;
-    transition: transform 0.2s ease;
-  }
-
-  .message:hover {
-    transform: translateX(2px);
   }
 
   .message.own {
     justify-content: flex-end;
-  }
-
-  .message.own:hover {
-    transform: translateX(-2px);
   }
 
   .message-content {
@@ -783,26 +803,38 @@
     flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    margin: 0.2rem 0;
-    padding: 0.2rem 0;
+    margin: 0.05rem 0;
+    padding: 0;
   }
 
   .system-message-text {
-    background-color: #e3f2fd;
-    color: #1976d2;
+    background-color: #e0e0e0;
+    color: #424242;
     padding: 0.25rem 0.5rem;
-    border-radius: 8px;
-    font-size: 0.75rem;
-    font-style: italic;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    font-style: normal;
     text-align: center;
     max-width: 80%;
+    border: 1px solid #bdbdbd;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+  }
+
+  .system-message-content {
+    line-height: 1.2;
   }
 
   .system-message-time {
-    font-size: 0.625rem;
-    color: #999;
+    font-size: 0.5rem;
+    color: rgba(66, 66, 66, 0.7);
     margin: 0;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1;
   }
 
   .text-message {
@@ -989,9 +1021,17 @@
 
   .media-button {
     cursor: pointer;
-    font-size: 1.5rem;
     padding: 0.5rem;
     user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+  }
+
+  .media-icon {
+    width: 24px;
+    height: 24px;
   }
 
   .media-button:hover {

@@ -132,7 +132,7 @@ class MessageStatusOut(MessageStatusBase):
 # ADMIN SCHEMAS
 # -----------------------
 class AdminAuth(BaseModel):
-    pin: str = Field(min_length=4, max_length=8, description="Admin PIN (default: 0000)")
+    pin: str = Field(min_length=4, max_length=8, description="Admin PIN")
     
     @field_validator('pin')
     @classmethod
